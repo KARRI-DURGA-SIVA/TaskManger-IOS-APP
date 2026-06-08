@@ -2,8 +2,21 @@ import SwiftUI
 
 struct AddTaskView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var taskStore: TaskStore
+    @EnvironmentObject private var settings: AppSettings
+    @FocusState private var focusedField: Field?
+
+    @State private var title = ""
+    @State private var description = ""
+    @State private var dueDate = Date()
     @State private var priority: PriorityLevel = .high
+    @State private var category = "Work"
     @State private var remindersEnabled = true
+
+    private enum Field {
+        case title
+        case description
+    }
 
     var body: some View {
         NavigationStack {
@@ -13,17 +26,46 @@ struct AddTaskView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 24) {
                         VStack(alignment: .leading, spacing: 18) {
-                            Text("What needs to be done?")
+                            TextField("What needs to be done?", text: $title)
                                 .font(.system(size: 21, weight: .bold))
-                            Text("Add notes or description...")
-                                .font(.system(size: 14))
-                            Spacer(minLength: 54)
+                                .focused($focusedField, equals: .title)
+
+                            TextEditor(text: $description)
+                                .font(.system(size: 15))
+                                .scrollContentBackground(.hidden)
+                                .frame(minHeight: 112)
+                                .overlay(alignment: .topLeading) {
+                                    if description.isEmpty {
+                                        Text("Add notes or description...")
+                                            .font(.system(size: 15))
+                                            .foregroundStyle(AppTheme.mutedText)
+                                            .padding(.top, 8)
+                                            .padding(.leading, 5)
+                                            .allowsHitTesting(false)
+                                    }
+                                }
+                                .focused($focusedField, equals: .description)
                         }
                         .padding(26)
-                        .frame(maxWidth: .infinity, minHeight: 196, alignment: .topLeading)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                         .background(CardBackground(radius: 24))
 
-                        FormOptionRow(iconColor: AppTheme.softBlue, title: "Date & Time", detail: "Today, 2:00 PM")
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 14) {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(AppTheme.softBlue)
+                                    .frame(width: 40, height: 40)
+                                    .overlay {
+                                        Image(systemName: "calendar")
+                                            .foregroundStyle(AppTheme.blue)
+                                    }
+                                DatePicker("Date & Time", selection: $dueDate)
+                                    .font(.system(size: 16, weight: .bold))
+                            }
+                        }
+                        .padding(.horizontal, 18)
+                        .frame(height: 82)
+                        .background(CardBackground(radius: 18))
 
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {
@@ -53,7 +95,28 @@ struct AddTaskView: View {
                         .frame(height: 74)
                         .background(CardBackground(radius: 18))
 
-                        FormOptionRow(iconColor: AppTheme.softGreen, title: "Category", detail: "Work")
+                        HStack(spacing: 14) {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(AppTheme.softGreen)
+                                .frame(width: 40, height: 40)
+                                .overlay {
+                                    Image(systemName: "tag.fill")
+                                        .foregroundStyle(AppTheme.success)
+                                }
+
+                            Picker("Category", selection: $category) {
+                                ForEach(taskStore.categories, id: \.self) { category in
+                                    Text(category).tag(category)
+                                }
+                            }
+                            .font(.system(size: 16, weight: .bold))
+                            .pickerStyle(.menu)
+
+                            Spacer()
+                        }
+                        .padding(.horizontal, 18)
+                        .frame(height: 74)
+                        .background(CardBackground(radius: 18))
 
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {
@@ -78,14 +141,29 @@ struct AddTaskView: View {
             }
             .navigationTitle("New Task")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                category = settings.defaultCategory
+                focusedField = .title
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
                         .font(.system(size: 16, weight: .semibold))
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Add") { dismiss() }
+                    Button("Add") {
+                        taskStore.addTask(
+                            title: title,
+                            description: description,
+                            dueDate: dueDate,
+                            priority: priority,
+                            category: category,
+                            reminderEnabled: remindersEnabled
+                        )
+                        dismiss()
+                    }
                         .font(.system(size: 16, weight: .semibold))
+                        .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }

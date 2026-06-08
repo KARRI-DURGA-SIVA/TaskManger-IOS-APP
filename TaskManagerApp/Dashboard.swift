@@ -1,16 +1,28 @@
 import SwiftUI
 
 struct DashboardView: View {
+    @EnvironmentObject private var authStore: AuthStore
+    @EnvironmentObject private var taskStore: TaskStore
+    @State private var showingCategories = false
+
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 28) {
                 HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("MONDAY, OCT 24")
-                            .font(.system(size: 14, weight: .medium))
-                            .textCase(.uppercase)
-                        Text("Good Morning!")
-                            .font(.system(size: 30, weight: .bold))
+                    TimelineView(.periodic(from: Date.now, by: 60)) { context in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(context.date.formatted(.dateTime.hour().minute()))
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(AppTheme.blue)
+                            Text(context.date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                                .font(.system(size: 13, weight: .medium))
+                                .textCase(.uppercase)
+                                .foregroundStyle(AppTheme.mutedText)
+                            Text(authStore.userName)
+                                .font(.system(size: 30, weight: .bold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
+                        }
                     }
 
                     Spacer()
@@ -21,36 +33,78 @@ struct DashboardView: View {
 
                 DailyProgressCard()
 
-                SectionHeader(title: "Categories", action: "See All")
+                SectionHeader(title: "Categories", action: "See All") {
+                    showingCategories = true
+                }
 
                 HStack(spacing: 16) {
-                    CategoryTile(name: "Work", count: "4 Tasks Today", color: AppTheme.softBlue, iconName: "briefcase.fill")
-                    CategoryTile(name: "Personal", count: "6 Tasks Today", color: AppTheme.softGreen, iconName: "person.fill")
+                    ForEach(Array(taskStore.categorySummaries().prefix(2))) { category in
+                        CategoryTile(
+                            name: category.name,
+                            count: category.count,
+                            color: category.color,
+                            iconName: iconName(for: category.name)
+                        )
+                    }
                 }
 
                 SectionHeader(title: "Upcoming", action: "View List")
 
                 VStack(spacing: 12) {
-                    TaskRow(title: "Review design system", subtitle: "10:00 AM · High Priority")
-                    TaskRow(title: "Grocery shopping", subtitle: "05:30 PM · Personal")
+                    if taskStore.upcomingTasks.isEmpty {
+                        EmptyStateView(title: "No tasks yet", subtitle: "Tap plus to add your first task.")
+                    } else {
+                        ForEach(taskStore.upcomingTasks.prefix(4)) { task in
+                            TaskRow(task: task) {
+                                taskStore.toggleComplete(task)
+                            }
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 128)
         }
+        .sheet(isPresented: $showingCategories) {
+            CategorySectionsView()
+                .environmentObject(taskStore)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+    }
+
+    private func iconName(for category: String) -> String {
+        switch category {
+        case "Work":
+            "briefcase.fill"
+        case "Personal":
+            "person.fill"
+        case "Health":
+            "heart.fill"
+        case "Learning":
+            "book.fill"
+        default:
+            "tag.fill"
+        }
     }
 }
 
 struct DailyProgressCard: View {
+    @EnvironmentObject private var taskStore: TaskStore
+
     var body: some View {
+        let total = taskStore.tasks.count
+        let completed = taskStore.completedTasks.count
+        let progress = taskStore.completionProgress
+
         HStack(spacing: 20) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Daily Progress")
                     .font(.system(size: 18, weight: .bold))
-                Text("8 of 12 tasks completed")
+                Text("\(completed) of \(total) tasks completed")
                     .font(.system(size: 15))
 
-                ProgressView(value: 0.66)
+                ProgressView(value: progress)
                     .progressViewStyle(.linear)
                     .tint(AppTheme.blue)
                     .scaleEffect(x: 1, y: 1.6, anchor: .center)
@@ -63,10 +117,10 @@ struct DailyProgressCard: View {
                 Circle()
                     .stroke(AppTheme.rail, lineWidth: 8)
                 Circle()
-                    .trim(from: 0, to: 0.66)
+                    .trim(from: 0, to: progress)
                     .stroke(AppTheme.blue, style: StrokeStyle(lineWidth: 8, lineCap: .butt))
                     .rotationEffect(.degrees(-90))
-                Text("66%")
+                Text("\(Int(progress * 100))%")
                     .font(.system(size: 15, weight: .bold))
             }
             .frame(width: 76, height: 76)
@@ -74,6 +128,52 @@ struct DailyProgressCard: View {
         .padding(.horizontal, 26)
         .frame(height: 130)
         .background(CardBackground(radius: 24))
+    }
+}
+
+struct CategorySectionsView: View {
+    @EnvironmentObject private var taskStore: TaskStore
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    ForEach(taskStore.categorySummaries()) { category in
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Text(category.name)
+                                    .font(.system(size: 20, weight: .bold))
+                                Spacer()
+                                Text(category.count)
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundStyle(AppTheme.mutedText)
+                            }
+
+                            let categoryTasks = taskStore.tasks(in: category.name)
+                            if categoryTasks.isEmpty {
+                                EmptyStateView(title: "No \(category.name.lowercased()) tasks", subtitle: "New tasks in this category will appear here.")
+                            } else {
+                                ForEach(categoryTasks) { task in
+                                    TaskRow(task: task) {
+                                        taskStore.toggleComplete(task)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(24)
+            }
+            .background(AppTheme.background.ignoresSafeArea())
+            .navigationTitle("Categories")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
     }
 }
 

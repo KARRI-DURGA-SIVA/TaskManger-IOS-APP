@@ -77,13 +77,14 @@ extension AppTab {
 struct SectionHeader: View {
     let title: String
     let action: String
+    var onAction: () -> Void = {}
 
     var body: some View {
         HStack {
             Text(title)
                 .font(.system(size: 21, weight: .bold))
             Spacer()
-            Button(action) {}
+            Button(action, action: onAction)
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(AppTheme.blue)
         }
