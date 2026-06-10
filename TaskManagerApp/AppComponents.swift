@@ -7,7 +7,7 @@ struct AppTabBar: View {
     var body: some View {
         ZStack(alignment: .top) {
             Rectangle()
-                .fill(.white)
+                .fill(AppTheme.surface)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .shadow(color: .black.opacity(0.05), radius: 10, y: -2)
 
@@ -36,7 +36,7 @@ struct AppTabBar: View {
             .offset(y: -18)
         }
         .frame(height: 104)
-        .background(.white)
+        .background(AppTheme.surface)
         .ignoresSafeArea(.container, edges: .bottom)
     }
 
@@ -51,7 +51,7 @@ struct AppTabBar: View {
                 Text(tab.rawValue)
                     .font(.system(size: 13, weight: selectedTab == tab ? .bold : .semibold))
             }
-            .foregroundStyle(selectedTab == tab ? AppTheme.blue : .black)
+            .foregroundStyle(selectedTab == tab ? AppTheme.blue : AppTheme.text)
             .frame(maxWidth: .infinity)
             .frame(height: 62)
         }
@@ -116,6 +116,6 @@ struct CardBackground: View {
     var body: some View {
         RoundedRectangle(cornerRadius: radius, style: .continuous)
             .fill(AppTheme.card)
-            .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+            .shadow(color: .black.opacity(0.16), radius: 4, y: 2)
     }
 }

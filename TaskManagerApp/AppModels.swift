@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UserNotifications
 
 enum AppTab: String, CaseIterable {
@@ -8,7 +9,7 @@ enum AppTab: String, CaseIterable {
     case settings = "Settings"
 }
 
-enum PriorityLevel: String, CaseIterable {
+enum PriorityLevel: String, CaseIterable, Codable {
     case high = "High"
     case medium = "Medium"
     case low = "Low"
@@ -65,8 +66,6 @@ struct CategorySummary: Identifiable {
         }
     }
 }
-
-extension PriorityLevel: Codable {}
 
 enum AppearanceMode: String, CaseIterable, Codable {
     case system = "System"
@@ -403,11 +402,28 @@ struct NeonTaskSyncClient {
 
 enum AppTheme {
     static let blue = Color(red: 0.02, green: 0.47, blue: 0.98)
-    static let background = Color(red: 0.94, green: 0.95, blue: 0.97)
-    static let card = Color(red: 0.985, green: 0.985, blue: 0.995)
-    static let mutedText = Color.black.opacity(0.62)
+    static let background = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.06, green: 0.07, blue: 0.10, alpha: 1)
+            : UIColor(red: 0.94, green: 0.95, blue: 0.97, alpha: 1)
+    })
+    static let card = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.12, green: 0.13, blue: 0.17, alpha: 1)
+            : UIColor(red: 0.985, green: 0.985, blue: 0.995, alpha: 1)
+    })
+    static let surface = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.09, green: 0.10, blue: 0.14, alpha: 1)
+            : UIColor.white
+    })
+    static let text = Color(UIColor.label)
+    static let inverseText = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark ? UIColor.black : UIColor.white
+    })
+    static let mutedText = Color(UIColor.secondaryLabel)
     static let softBlue = Color(red: 0.86, green: 0.92, blue: 1.0)
     static let softGreen = Color(red: 0.88, green: 0.96, blue: 0.91)
     static let success = Color(red: 0.12, green: 0.78, blue: 0.36)
-    static let rail = Color.black.opacity(0.10)
+    static let rail = Color(UIColor.separator).opacity(0.65)
 }

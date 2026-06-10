@@ -82,9 +82,9 @@ struct AddTaskView: View {
                                     } label: {
                                         Text(String(level.rawValue.prefix(1)))
                                             .font(.system(size: 14, weight: .bold))
-                                            .foregroundStyle(priority == level ? .black : .white)
+                                            .foregroundStyle(priority == level ? AppTheme.text : .white)
                                             .frame(width: 34, height: 34)
-                                            .background(priority == level ? Color.black.opacity(0.09) : AppTheme.blue)
+                                            .background(priority == level ? AppTheme.rail.opacity(0.45) : AppTheme.blue)
                                             .clipShape(Circle())
                                     }
                                     .buttonStyle(.plain)

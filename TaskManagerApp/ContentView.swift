@@ -1,3 +1,4 @@
+import GoogleSignIn
 import SwiftUI
 
 struct ContentView: View {
@@ -20,6 +21,9 @@ struct ContentView: View {
                     .environmentObject(authStore)
                     .environmentObject(settings)
             }
+        }
+        .onOpenURL { url in
+            GIDSignIn.sharedInstance.handle(url)
         }
         .task {
             try? await Task.sleep(for: .seconds(1.4))
@@ -123,7 +127,7 @@ struct AuthView: View {
                 VStack(spacing: 10) {
                     ZStack {
                         Circle()
-                            .fill(.white.opacity(0.42))
+                            .fill(AppTheme.surface.opacity(0.72))
                             .frame(width: 78, height: 78)
                         Image(systemName: isSignUp ? "person.crop.circle.badge.plus" : "checkmark.seal.fill")
                             .font(.system(size: 38, weight: .bold))
@@ -154,11 +158,11 @@ struct AuthView: View {
                     }
                 }
                 .padding(5)
-                .background(.white.opacity(0.32))
+                .background(AppTheme.surface.opacity(0.42))
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(.white.opacity(0.60), lineWidth: 1)
+                        .stroke(AppTheme.rail.opacity(0.6), lineWidth: 1)
                 }
 
                 VStack(spacing: 14) {
@@ -184,6 +188,10 @@ struct AuthView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSubmit)
+
+                GoogleSignInButton {
+                    signInWithGoogle()
+                }
             }
             .frame(maxWidth: 420)
             .padding(.horizontal, 24)
@@ -194,6 +202,65 @@ struct AuthView: View {
         !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !password.isEmpty &&
         (!isSignUp || !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    private func signInWithGoogle() {
+        guard
+            let clientID = Bundle.main.object(forInfoDictionaryKey: "GIDClientID") as? String,
+            !clientID.isEmpty
+        else {
+            print("Missing GIDClientID. Add your Google iOS client ID to Info.plist before using Google Sign-In.")
+            return
+        }
+
+        GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
+
+        guard let rootViewController = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .rootViewController
+        else { return }
+
+        GIDSignIn.sharedInstance.signIn(withPresenting: rootViewController) { result, error in
+            guard error == nil, let profile = result?.user.profile else { return }
+            authStore.signIn(
+                name: profile.name,
+                email: profile.email,
+                password: "google-oauth",
+                mode: isSignUp ? .signUp : .signIn
+            )
+        }
+    }
+}
+
+struct GoogleSignInButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Text("G")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(Color(red: 0.91, green: 0.25, blue: 0.20))
+                    .frame(width: 28, height: 28)
+                    .background(.white)
+                    .clipShape(Circle())
+
+                Text("Continue with Google")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(AppTheme.text)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 54)
+            .background(AppTheme.surface.opacity(0.72))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(AppTheme.rail.opacity(0.8), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -206,7 +273,7 @@ struct AuthModeButton: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(isSelected ? .white : .black.opacity(0.64))
+                .foregroundStyle(isSelected ? .white : AppTheme.text.opacity(0.72))
                 .frame(maxWidth: .infinity)
                 .frame(height: 40)
                 .background(isSelected ? AppTheme.blue : Color.clear)
@@ -260,14 +327,12 @@ struct AuthSecureField: View {
 }
 
 struct AuthBackgroundView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         ZStack {
             LinearGradient(
-                colors: [
-                    Color(red: 0.90, green: 0.95, blue: 1.0),
-                    Color(red: 0.97, green: 0.99, blue: 0.94),
-                    Color(red: 1.0, green: 0.94, blue: 0.96)
-                ],
+                colors: backgroundColors,
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -276,7 +341,7 @@ struct AuthBackgroundView: View {
             VStack {
                 HStack {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(.white.opacity(0.42))
+                        .fill(AppTheme.surface.opacity(0.52))
                         .frame(width: 144, height: 144)
                         .rotationEffect(.degrees(14))
                     Spacer()
@@ -292,6 +357,22 @@ struct AuthBackgroundView: View {
             .padding(32)
         }
     }
+
+    private var backgroundColors: [Color] {
+        if colorScheme == .dark {
+            [
+                Color(red: 0.04, green: 0.05, blue: 0.08),
+                Color(red: 0.07, green: 0.09, blue: 0.14),
+                Color(red: 0.10, green: 0.08, blue: 0.14)
+            ]
+        } else {
+            [
+                Color(red: 0.90, green: 0.95, blue: 1.0),
+                Color(red: 0.97, green: 0.99, blue: 0.94),
+                Color(red: 1.0, green: 0.94, blue: 0.96)
+            ]
+        }
+    }
 }
 
 private extension View {
@@ -300,11 +381,11 @@ private extension View {
             .font(.system(size: 16, weight: .semibold))
             .padding(.horizontal, 16)
             .frame(height: 54)
-            .background(.white.opacity(0.68))
+            .background(AppTheme.surface.opacity(0.72))
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(.white.opacity(0.85), lineWidth: 1)
+                    .stroke(AppTheme.rail.opacity(0.85), lineWidth: 1)
             }
             .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
     }

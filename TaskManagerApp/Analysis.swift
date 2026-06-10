@@ -40,7 +40,7 @@ struct AnalysisView: View {
                     Divider()
 
                     HStack {
-                        MetricView(value: "\(taskStore.tasks.count)", label: "TOTAL TASKS", color: .black)
+                        MetricView(value: "\(taskStore.tasks.count)", label: "TOTAL TASKS", color: AppTheme.text)
                         Divider().frame(height: 46)
                         MetricView(value: "\(Int(taskStore.completionProgress * 100))%", label: "SUCCESS RATE", color: AppTheme.success)
                         Divider().frame(height: 46)
@@ -129,7 +129,7 @@ struct BarChart: View {
                         .frame(width: bars.count > 7 ? 12 : 20, height: 160 * value)
                     Text(labels[index])
                         .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.black.opacity(0.42))
+                        .foregroundStyle(AppTheme.mutedText)
                 }
             }
         }

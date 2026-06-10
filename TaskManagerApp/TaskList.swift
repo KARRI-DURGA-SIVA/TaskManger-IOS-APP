@@ -51,9 +51,9 @@ struct TaskListView: View {
                             Button {
                                 selectedFilter = filter
                             } label: {
-                                Text(filter)
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(selectedFilter == filter ? .white : .black)
+                                    Text(filter)
+                                        .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(selectedFilter == filter ? .white : AppTheme.text)
                                     .frame(minWidth: 58)
                                     .padding(.horizontal, 18)
                                     .padding(.vertical, 12)
@@ -179,17 +179,17 @@ struct TaskRow: View {
     var isComplete = false
     var onToggle: () -> Void = {}
 
-    init(title: String, subtitle: String, isComplete: Bool = false, onToggle: @escaping () -> Void = {}) {
-        self.title = title
-        self.subtitle = subtitle
-        self.isComplete = isComplete
-        self.onToggle = onToggle
-    }
-
     init(task: TaskItem, onToggle: @escaping () -> Void = {}) {
         self.title = task.title
         self.subtitle = task.subtitle
         self.isComplete = task.isComplete
+        self.onToggle = onToggle
+    }
+
+    init(title: String, subtitle: String, isComplete: Bool = false, onToggle: @escaping () -> Void = {}) {
+        self.title = title
+        self.subtitle = subtitle
+        self.isComplete = isComplete
         self.onToggle = onToggle
     }
 
@@ -206,13 +206,13 @@ struct TaskRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.system(size: 16, weight: .bold))
-                    .strikethrough(isComplete, color: .black.opacity(0.45))
-                    .foregroundStyle(isComplete ? .black.opacity(0.58) : .black)
+                    .strikethrough(isComplete, color: AppTheme.mutedText)
+                    .foregroundStyle(isComplete ? AppTheme.mutedText : AppTheme.text)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                 Text(subtitle)
                     .font(.system(size: 13))
-                    .foregroundStyle(isComplete ? .black.opacity(0.60) : .black)
+                    .foregroundStyle(isComplete ? AppTheme.mutedText : AppTheme.text)
             }
             Spacer()
         }
