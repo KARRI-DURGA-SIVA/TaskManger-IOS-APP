@@ -143,6 +143,7 @@ struct AddTaskView: View {
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 category = settings.defaultCategory
+                remindersEnabled = settings.notificationsEnabled
                 focusedField = .title
             }
             .toolbar {
