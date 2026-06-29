@@ -13,7 +13,7 @@ struct AnalysisView: View {
                     Text(selectedRange.subtitle)
                         .font(.system(size: 14, weight: .semibold))
                 }
-                .padding(.top, 56)
+                .padding(.top, 60)
 
                 VStack(spacing: 26) {
                     HStack {
