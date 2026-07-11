@@ -137,12 +137,12 @@ struct BarChart: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: bars.count > 7 ? 10 : 22) {
-            ForEach(Array(bars.enumerated()), id: \.offset) { index, value in
+            ForEach(Array(zip(bars, labels).enumerated()), id: \.offset) { _, item in
                 VStack(spacing: 10) {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(AppTheme.blue)
-                        .frame(width: bars.count > 7 ? 12 : 20, height: 160 * value)
-                    Text(labels[index])
+                        .frame(width: bars.count > 7 ? 12 : 20, height: 160 * item.0)
+                    Text(item.1)
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(AppTheme.mutedText)
                 }
