@@ -392,7 +392,12 @@ struct NeonTaskSyncClient {
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try encoder.encode(body)
-            _ = try await URLSession.shared.data(for: request)
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200..<300).contains(httpResponse.statusCode) else {
+                print("Neon sync failed: server returned an unsuccessful response")
+                return
+            }
         } catch {
             print("Neon sync failed: \(error.localizedDescription)")
         }
