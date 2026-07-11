@@ -85,9 +85,10 @@ struct AnalysisView: View {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date.now)
         let dates = (0..<days).compactMap { calendar.date(byAdding: .day, value: -(days - 1) + $0, to: today) }
-        let bucketSize = max(dates.count / labels.count, 1)
-        let counts = stride(from: 0, to: dates.count, by: bucketSize).prefix(labels.count).map { start in
-            let bucket = dates[start..<min(start + bucketSize, dates.count)]
+        let counts = labels.indices.map { index in
+            let start = index * dates.count / labels.count
+            let end = (index + 1) * dates.count / labels.count
+            let bucket = dates[start..<end]
             return bucket.reduce(0) { count, day in
                 count + taskStore.completedTasks.filter { calendar.isDate($0.dueDate, inSameDayAs: day) }.count
             }
