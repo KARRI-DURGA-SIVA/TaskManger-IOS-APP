@@ -67,7 +67,13 @@ struct AnalysisView: View {
     private var chartData: (bars: [CGFloat], labels: [String]) {
         switch selectedRange {
         case .week:
-            return completionBars(days: 7, labels: ["M", "T", "W", "T", "F", "S", "S"])
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: Date.now)
+            let labels = (0..<7).compactMap { offset -> String? in
+                guard let date = calendar.date(byAdding: .day, value: -6 + offset, to: today) else { return nil }
+                return String(calendar.shortWeekdaySymbols[calendar.component(.weekday, from: date) - 1].prefix(1))
+            }
+            return completionBars(days: 7, labels: labels)
         case .month:
             return completionBars(days: 30, labels: ["1", "5", "10", "15", "20", "25", "30"])
         case .year:
