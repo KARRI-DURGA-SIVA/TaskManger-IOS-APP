@@ -98,7 +98,7 @@ struct TaskListView: View {
         }
         switch selectedFilter {
         case "Today":
-            return search(sortedTasks.filter(\.isToday))
+            return search(sortedTasks.filter { $0.isToday && !$0.isComplete })
         case "Upcoming":
             return search(sortedTasks.filter { !$0.isComplete && $0.dueDate >= Date.now })
         case "Completed":
