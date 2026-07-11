@@ -142,7 +142,9 @@ struct AddTaskView: View {
             .navigationTitle("New Task")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
-                category = settings.defaultCategory
+                category = taskStore.categories.contains(settings.defaultCategory)
+                    ? settings.defaultCategory
+                    : taskStore.categories.first ?? "Work"
                 remindersEnabled = settings.notificationsEnabled
                 focusedField = .title
             }
