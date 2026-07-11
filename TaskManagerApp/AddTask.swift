@@ -88,6 +88,8 @@ struct AddTaskView: View {
                                             .clipShape(Circle())
                                     }
                                     .buttonStyle(.plain)
+                                    .accessibilityLabel("\(level.rawValue) priority")
+                                    .accessibilityAddTraits(priority == level ? .isSelected : [])
                                 }
                             }
                         }
