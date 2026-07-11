@@ -118,8 +118,16 @@ struct AnalysisView: View {
     }
 
     private var averagePerDay: Int {
-        guard !taskStore.tasks.isEmpty else { return 0 }
-        return Int(ceil(Double(taskStore.tasks.count) / 7.0))
+        let days: Int
+        switch selectedRange {
+        case .week: days = 7
+        case .month: days = 30
+        case .year: days = 365
+        }
+        let calendar = Calendar.current
+        let start = calendar.date(byAdding: .day, value: -(days - 1), to: calendar.startOfDay(for: Date.now)) ?? .distantPast
+        let completedInRange = taskStore.completedTasks.filter { $0.dueDate >= start && $0.dueDate <= Date.now }.count
+        return Int(ceil(Double(completedInRange) / Double(days)))
     }
 }
 
