@@ -224,12 +224,14 @@ struct AuthView: View {
 
         GIDSignIn.sharedInstance.signIn(withPresenting: rootViewController) { result, error in
             guard error == nil, let profile = result?.user.profile else { return }
-            authStore.signIn(
-                name: profile.name,
-                email: profile.email,
-                password: "google-oauth",
-                mode: isSignUp ? .signUp : .signIn
-            )
+            Task { @MainActor in
+                authStore.signIn(
+                    name: profile.name,
+                    email: profile.email,
+                    password: "google-oauth",
+                    mode: isSignUp ? .signUp : .signIn
+                )
+            }
         }
     }
 }

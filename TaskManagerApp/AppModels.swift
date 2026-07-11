@@ -152,6 +152,7 @@ final class TaskStore: ObservableObject {
         )
         tasks.insert(task, at: 0)
         save()
+        updateReminder(for: task)
 
         Task {
             await syncClient.upsert(task: task)
@@ -164,6 +165,7 @@ final class TaskStore: ObservableObject {
         save()
 
         let updatedTask = tasks[index]
+        updateReminder(for: updatedTask)
         Task {
             await syncClient.upsert(task: updatedTask)
         }
@@ -213,6 +215,23 @@ final class TaskStore: ObservableObject {
     private func save() {
         guard let data = try? JSONEncoder().encode(tasks) else { return }
         UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    private func updateReminder(for task: TaskItem) {
+        let center = UNUserNotificationCenter.current()
+        let identifier = "task-manager.task.\(task.id.uuidString)"
+        center.removePendingNotificationRequests(withIdentifiers: [identifier])
+
+        guard task.reminderEnabled, !task.isComplete, task.dueDate > Date.now else { return }
+        let content = UNMutableNotificationContent()
+        content.title = task.title
+        content.body = task.description.isEmpty ? "This task is due now." : task.description
+        content.sound = .default
+        let trigger = UNTimeIntervalNotificationTrigger(
+            timeInterval: max(task.dueDate.timeIntervalSinceNow, 1),
+            repeats: false
+        )
+        center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: trigger))
     }
 }
 
