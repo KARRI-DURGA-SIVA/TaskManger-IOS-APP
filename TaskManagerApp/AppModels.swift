@@ -223,6 +223,10 @@ final class AppSettings: ObservableObject {
             UserDefaults.standard.set(notificationsEnabled, forKey: notificationsKey)
             if notificationsEnabled {
                 requestNotificationPermission()
+            } else {
+                UNUserNotificationCenter.current().removePendingNotificationRequests(
+                    withIdentifiers: ["task-manager.daily-reminder"]
+                )
             }
         }
     }
