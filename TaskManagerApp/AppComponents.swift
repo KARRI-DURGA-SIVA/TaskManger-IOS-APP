@@ -5,39 +5,32 @@ struct AppTabBar: View {
     @Binding var showingAddTask: Bool
 
     var body: some View {
-        ZStack {
-            HStack(spacing: 2) {
-                tabButton(.overview)
-                tabButton(.tasks)
-                Spacer(minLength: 62)
-                tabButton(.stats)
-                tabButton(.settings)
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 58)
-
-            Button {
-                showingAddTask = true
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 48, height: 48)
-                    .background(AppTheme.accentGradient)
-                    .clipShape(Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.45), lineWidth: 1))
-                    .shadow(color: AppTheme.blue.opacity(0.28), radius: 8, y: 4)
-            }
-            .buttonStyle(.plain)
-            .offset(y: -8)
+        HStack(spacing: 2) {
+            tabButton(.overview)
+            tabButton(.tasks)
+            Spacer(minLength: 70)
+            tabButton(.stats)
+            tabButton(.settings)
         }
-        .frame(height: 58)
+        .padding(.horizontal, 10)
+        .frame(height: 60)
         .background(.ultraThinMaterial)
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(AppTheme.cardBorder)
                 .frame(height: 0.5)
         }
+        .overlay(alignment: .top) {
+            Button { showingAddTask = true } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 23, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: 58, height: 58).background(AppTheme.accentGradient, in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.8), lineWidth: 3))
+                    .shadow(color: AppTheme.blue.opacity(0.34), radius: 12, y: 7)
+            }
+            .buttonStyle(.plain).contentShape(Circle()).offset(y: -29).zIndex(100)
+        }
+        .zIndex(100)
     }
 
     private func tabButton(_ tab: AppTab) -> some View {

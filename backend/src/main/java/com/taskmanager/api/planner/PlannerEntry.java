@@ -10,9 +10,9 @@ import java.util.UUID;
 public class PlannerEntry {
     @Id private UUID id;
     @ManyToOne(optional = false, fetch = FetchType.LAZY) private AppUser owner;
-    @Column(nullable = false) private String title;
+    @Column(nullable = false, length = 500) private String title;
     @Column(length = 6000) private String details;
-    @Column(nullable = false) private String entryType;
+    @Column(nullable = false, length = 32) private String entryType;
     @Column(nullable = false) private Instant scheduledAt;
     @Column(nullable = false) private boolean complete;
     @Column(nullable = false) private Instant createdAt;

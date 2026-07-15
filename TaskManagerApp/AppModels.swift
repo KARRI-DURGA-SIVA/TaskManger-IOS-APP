@@ -259,41 +259,88 @@ final class TaskStore: ObservableObject {
 final class PlannerStore: ObservableObject {
     @Published private(set) var entries: [PlannerEntry] = []
     @Published private(set) var isSyncing = false
+    @Published private(set) var isSaving = false
+    @Published private(set) var streakCelebration: Int?
     private let storageKey = "task-manager.planner-entries"
+    private let pendingStorageKey = "task-manager.pending-planner-entry-ids"
+    private var pendingEntryIDs: Set<UUID> = []
     private let api = SpringBootAPIClient()
 
-    init() { loadLocal() }
+    init() {
+        loadLocal()
+        loadPendingIDs()
+    }
 
     func entries(on day: Date) -> [PlannerEntry] {
         entries.filter { Calendar.current.isDate($0.scheduledAt, inSameDayAs: day) }
             .sorted { $0.scheduledAt < $1.scheduledAt }
     }
 
-    var completedActivities: [PlannerEntry] {
-        entries.filter { $0.entryType == .activity && $0.isComplete }
+    var completedPlannerItems: [PlannerEntry] {
+        entries.filter { $0.entryType != .note && $0.isComplete }
     }
 
-    func activities(inWeekStarting weekStart: Date) -> [PlannerEntry] {
+    func trackableItems(inWeekStarting weekStart: Date) -> [PlannerEntry] {
         let calendar = Calendar.current
         let start = calendar.startOfDay(for: weekStart)
         let end = calendar.date(byAdding: .day, value: 7, to: start) ?? start
         return entries.filter {
-            $0.entryType == .activity && $0.scheduledAt >= start && $0.scheduledAt < end
+            $0.entryType != .note && $0.scheduledAt >= start && $0.scheduledAt < end
         }
     }
 
     func progress(inWeekStarting weekStart: Date) -> Double {
-        let activities = activities(inWeekStarting: weekStart)
-        guard !activities.isEmpty else { return 0 }
-        return Double(activities.filter(\.isComplete).count) / Double(activities.count)
+        let items = trackableItems(inWeekStarting: weekStart)
+        guard !items.isEmpty else { return 0 }
+        return Double(items.filter(\.isComplete).count) / Double(items.count)
+    }
+
+    var currentStreak: Int {
+        let calendar = Calendar.current
+        let completedDays = Set(completedPlannerItems.map { calendar.startOfDay(for: $0.scheduledAt) })
+        guard !completedDays.isEmpty else { return 0 }
+        var cursor = calendar.startOfDay(for: Date.now)
+        if !completedDays.contains(cursor) {
+            guard let yesterday = calendar.date(byAdding: .day, value: -1, to: cursor), completedDays.contains(yesterday) else { return 0 }
+            cursor = yesterday
+        }
+        var streak = 0
+        while completedDays.contains(cursor) {
+            streak += 1
+            guard let previous = calendar.date(byAdding: .day, value: -1, to: cursor) else { break }
+            cursor = previous
+        }
+        return streak
+    }
+
+    var bestStreak: Int {
+        let calendar = Calendar.current
+        let days = Set(completedPlannerItems.map { calendar.startOfDay(for: $0.scheduledAt) }).sorted()
+        guard !days.isEmpty else { return 0 }
+        var best = 1
+        var run = 1
+        for index in 1..<days.count {
+            if calendar.dateComponents([.day], from: days[index - 1], to: days[index]).day == 1 { run += 1 }
+            else { run = 1 }
+            best = max(best, run)
+        }
+        return best
+    }
+
+    var sevenDayAverage: Int {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date.now)
+        let start = calendar.date(byAdding: .day, value: -6, to: today) ?? today
+        let items = entries.filter { $0.entryType != .note && $0.scheduledAt >= start && $0.scheduledAt < calendar.date(byAdding: .day, value: 1, to: today)! }
+        guard !items.isEmpty else { return 0 }
+        return Int((Double(items.filter(\.isComplete).count) / Double(items.count)) * 100)
     }
 
     func add(title: String, details: String, type: PlannerEntryType, scheduledAt: Date) {
         let entry = PlannerEntry(title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                                  details: details.trimmingCharacters(in: .whitespacesAndNewlines),
                                  entryType: type, scheduledAt: scheduledAt)
-        entries.append(entry); saveLocal()
-        Task { await api.upsertPlannerEntry(entry) }
+        entries.append(entry); saveLocal(); markPending(entry.id)
     }
 
     func add(title: String, details: String, type: PlannerEntryType, dates: [Date]) {
@@ -304,16 +351,19 @@ final class PlannerStore: ObservableObject {
         }
         entries.append(contentsOf: newEntries)
         saveLocal()
-        Task {
-            for entry in newEntries { await api.upsertPlannerEntry(entry) }
-        }
+        newEntries.forEach { markPending($0.id) }
     }
 
     func toggle(_ entry: PlannerEntry) {
         guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
-        entries[index].isComplete.toggle(); saveLocal()
-        let updated = entries[index]
-        Task { await api.upsertPlannerEntry(updated) }
+        entries[index].isComplete.toggle(); saveLocal(); markPending(entry.id)
+        if entries[index].isComplete {
+            streakCelebration = max(currentStreak, 1)
+            Task {
+                try? await Task.sleep(for: .seconds(2.4))
+                streakCelebration = nil
+            }
+        }
     }
 
     func delete(_ entry: PlannerEntry) {
@@ -321,14 +371,47 @@ final class PlannerStore: ObservableObject {
         Task { await api.deletePlannerEntry(entry.id) }
     }
 
+    func saveWeek(starting weekStart: Date) async -> Bool {
+        isSaving = true
+        defer { isSaving = false }
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: weekStart)
+        let end = calendar.date(byAdding: .day, value: 7, to: start) ?? start
+        let weekEntries = entries.filter { $0.scheduledAt >= start && $0.scheduledAt < end }
+        weekEntries.forEach { markPending($0.id) }
+        var allSaved = true
+        for entry in weekEntries {
+            let saved = await api.upsertPlannerEntry(entry)
+            if saved { markSynced(entry.id) } else { allSaved = false; break }
+        }
+        if allSaved {
+            for offset in 0..<7 {
+                guard let day = calendar.date(byAdding: .day, value: offset, to: start) else { continue }
+                let items = entries(on: day).filter { $0.entryType != .note }
+                let completed = items.filter(\.isComplete).count
+                let percent = items.isEmpty ? 0 : Int(Double(completed) / Double(items.count) * 100)
+                let saved = await api.saveDailyProgress(
+                    date: day, scheduledCount: items.count, completedCount: completed,
+                    completionPercent: percent, currentStreak: currentStreak
+                )
+                if !saved { allSaved = false; break }
+            }
+        }
+        return allSaved
+    }
+
     func sync(weekStart: Date) async {
         isSyncing = true
         defer { isSyncing = false }
+        await flushPendingEntries()
         if let remote = try? await api.plannerEntries(weekStart: weekStart) {
             let remoteIDs = Set(remote.map(\.id))
             let start = Calendar.current.startOfDay(for: weekStart)
             let end = Calendar.current.date(byAdding: .day, value: 7, to: start) ?? start
-            entries.removeAll { $0.scheduledAt >= start && $0.scheduledAt < end && !remoteIDs.contains($0.id) }
+            entries.removeAll {
+                $0.scheduledAt >= start && $0.scheduledAt < end
+                    && !remoteIDs.contains($0.id) && !pendingEntryIDs.contains($0.id)
+            }
             for entry in remote {
                 if let index = entries.firstIndex(where: { $0.id == entry.id }) { entries[index] = entry }
                 else { entries.append(entry) }
@@ -344,6 +427,28 @@ final class PlannerStore: ObservableObject {
     }
     private func saveLocal() {
         if let data = try? JSONEncoder().encode(entries) { UserDefaults.standard.set(data, forKey: storageKey) }
+    }
+    private func loadPendingIDs() {
+        let values = UserDefaults.standard.stringArray(forKey: pendingStorageKey) ?? []
+        pendingEntryIDs = Set(values.compactMap(UUID.init(uuidString:)))
+    }
+    private func markPending(_ id: UUID) {
+        pendingEntryIDs.insert(id)
+        savePendingIDs()
+    }
+    private func markSynced(_ id: UUID) {
+        pendingEntryIDs.remove(id)
+        savePendingIDs()
+    }
+    private func savePendingIDs() {
+        UserDefaults.standard.set(pendingEntryIDs.map(\.uuidString), forKey: pendingStorageKey)
+    }
+    private func flushPendingEntries() async {
+        let queued = entries.filter { pendingEntryIDs.contains($0.id) }
+        for entry in queued {
+            if await api.upsertPlannerEntry(entry) { markSynced(entry.id) }
+            else { break }
+        }
     }
 }
 
@@ -623,10 +728,10 @@ struct SpringBootAPIClient {
         return try decoder.decode([PlannerEntry].self, from: data)
     }
 
-    func upsertPlannerEntry(_ entry: PlannerEntry) async {
-        guard let email = UserDefaults.standard.string(forKey: "task-manager.user-email"), !email.isEmpty else { return }
+    func upsertPlannerEntry(_ entry: PlannerEntry) async -> Bool {
+        guard let email = UserDefaults.standard.string(forKey: "task-manager.user-email"), !email.isEmpty else { return false }
         let payload = PlannerPayload(ownerEmail: email, entry: entry)
-        await send(path: "planner/\(entry.id.uuidString)", method: "PUT", payload: payload)
+        return await send(path: "planner/\(entry.id.uuidString)", method: "PUT", payload: payload)
     }
 
     func deletePlannerEntry(_ id: UUID) async {
@@ -636,6 +741,16 @@ struct SpringBootAPIClient {
         guard let url = components.url else { return }
         var request = URLRequest(url: url); request.httpMethod = "DELETE"
         _ = try? await URLSession.shared.data(for: request)
+    }
+
+    func saveDailyProgress(date: Date, scheduledCount: Int, completedCount: Int,
+                           completionPercent: Int, currentStreak: Int) async -> Bool {
+        guard let email = UserDefaults.standard.string(forKey: "task-manager.user-email"), !email.isEmpty else { return false }
+        let payload = DailyProgressPayload(
+            ownerEmail: email, date: Self.dayFormatter.string(from: date), scheduledCount: scheduledCount,
+            completedCount: completedCount, completionPercent: completionPercent, currentStreak: currentStreak
+        )
+        return await send(path: "progress/daily", method: "PUT", payload: payload)
     }
 
     private func request<Request: Encodable, Response: Decodable>(path: String, method: String, payload: Request) async throws -> Response {
@@ -657,8 +772,9 @@ struct SpringBootAPIClient {
         return (object["detail"] as? String) ?? (object["message"] as? String) ?? (object["error"] as? String)
     }
 
-    private func send<T: Encodable>(path: String, method: String, payload: T) async {
-        guard let endpoint = baseURL?.appending(path: path) else { return }
+    @discardableResult
+    private func send<T: Encodable>(path: String, method: String, payload: T) async -> Bool {
+        guard let endpoint = baseURL?.appending(path: path) else { return false }
 
         do {
             let encoder = JSONEncoder()
@@ -667,14 +783,20 @@ struct SpringBootAPIClient {
             request.httpMethod = method
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try encoder.encode(payload)
-            let (_, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200..<300).contains(httpResponse.statusCode) else {
-                print("Spring Boot sync failed: server returned an unsuccessful response")
-                return
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("Spring Boot sync failed: invalid HTTP response")
+                return false
             }
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                let message = serverMessage(from: data) ?? HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode)
+                print("Spring Boot sync failed (HTTP \(httpResponse.statusCode)): \(message)")
+                return false
+            }
+            return true
         } catch {
             print("Spring Boot sync failed: \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -717,7 +839,24 @@ struct SpringBootAPIClient {
         }
     }
 
+    private struct DailyProgressPayload: Encodable {
+        let ownerEmail: String
+        let date: String
+        let scheduledCount: Int
+        let completedCount: Int
+        let completionPercent: Int
+        let currentStreak: Int
+    }
+
     private static let isoFormatter = ISO8601DateFormatter()
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 
     struct AuthResponse: Decodable {
         let id: Int

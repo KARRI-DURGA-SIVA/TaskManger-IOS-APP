@@ -6,7 +6,11 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
+import jakarta.transaction.Transactional;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -32,6 +36,7 @@ public class PlannerController {
     }
 
     @PutMapping("/{id}")
+    @Transactional
     public PlannerResponse upsert(@PathVariable UUID id, @Valid @RequestBody PlannerRequest request) {
         AppUser owner = users.findByEmailIgnoreCase(request.ownerEmail())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account not found"));
@@ -48,6 +53,7 @@ public class PlannerController {
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Transactional
     public void delete(@PathVariable UUID id, @RequestParam @Email String email) {
         PlannerEntry entry = entries.findById(id)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Entry not found"));
@@ -57,8 +63,20 @@ public class PlannerController {
         entries.delete(entry);
     }
 
-    public record PlannerRequest(@Email @NotBlank String ownerEmail, @NotBlank String title,
-        String details, @NotBlank String entryType, @NotNull Instant scheduledAt,
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
+    public ProblemDetail invalidPlannerData(DataIntegrityViolationException exception) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "This planner item contains data that cannot be stored. Edit or recreate the item and retry."
+        );
+        problem.setTitle("Invalid planner item");
+        return problem;
+    }
+
+    public record PlannerRequest(@Email @NotBlank String ownerEmail,
+        @NotBlank @Size(max = 500) String title,
+        @Size(max = 6000) String details, @NotBlank @Size(max = 32) String entryType, @NotNull Instant scheduledAt,
         boolean isComplete, @NotNull Instant createdAt) {}
     public record PlannerResponse(UUID id, String title, String details, String entryType,
         Instant scheduledAt, boolean isComplete, Instant createdAt) {

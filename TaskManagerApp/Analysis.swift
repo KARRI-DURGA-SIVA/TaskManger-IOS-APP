@@ -95,7 +95,7 @@ struct AnalysisView: View {
             return bucket.reduce(0) { count, day in
                 count
                     + taskStore.completedTasks.filter { calendar.isDate($0.dueDate, inSameDayAs: day) }.count
-                    + plannerStore.completedActivities.filter { calendar.isDate($0.scheduledAt, inSameDayAs: day) }.count
+                    + plannerStore.completedPlannerItems.filter { calendar.isDate($0.scheduledAt, inSameDayAs: day) }.count
             }
         }
         let maxCount = max(counts.max() ?? 0, 1)
@@ -117,7 +117,7 @@ struct AnalysisView: View {
                 let taskComponents = calendar.dateComponents([.month, .year], from: $0.dueDate)
                 return taskComponents.month == monthComponents.month && taskComponents.year == monthComponents.year
             }.count
-            let activities = plannerStore.completedActivities.filter {
+            let activities = plannerStore.completedPlannerItems.filter {
                 let components = calendar.dateComponents([.month, .year], from: $0.scheduledAt)
                 return components.month == monthComponents.month && components.year == monthComponents.year
             }.count
@@ -137,14 +137,14 @@ struct AnalysisView: View {
         let calendar = Calendar.current
         let start = calendar.date(byAdding: .day, value: -(days - 1), to: calendar.startOfDay(for: Date.now)) ?? .distantPast
         let completedInRange = taskStore.completedTasks.filter { $0.dueDate >= start && $0.dueDate <= Date.now }.count
-            + plannerStore.completedActivities.filter { $0.scheduledAt >= start && $0.scheduledAt <= Date.now }.count
+            + plannerStore.completedPlannerItems.filter { $0.scheduledAt >= start && $0.scheduledAt <= Date.now }.count
         return Int(ceil(Double(completedInRange) / Double(days)))
     }
 
-    private var totalTracked: Int { taskStore.tasks.count + plannerStore.entries.filter { $0.entryType == .activity }.count }
+    private var totalTracked: Int { taskStore.tasks.count + plannerStore.entries.filter { $0.entryType != .note }.count }
     private var successRate: Int {
         guard totalTracked > 0 else { return 0 }
-        return Int((Double(taskStore.completedTasks.count + plannerStore.completedActivities.count) / Double(totalTracked)) * 100)
+        return Int((Double(taskStore.completedTasks.count + plannerStore.completedPlannerItems.count) / Double(totalTracked)) * 100)
     }
     private var currentSunday: Date {
         let calendar = Calendar.current

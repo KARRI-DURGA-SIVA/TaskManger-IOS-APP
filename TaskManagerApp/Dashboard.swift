@@ -24,6 +24,8 @@ struct DashboardView: View {
 
                 todaySnapshot
 
+                ConsistencyMotivationCard()
+
                 WeeklyWorkspaceCard {
                     showingPlanner = true
                 }
@@ -45,12 +47,17 @@ struct DashboardView: View {
 
                 SectionHeader(title: "Next up", action: "View tasks", onAction: onViewTasks)
 
-                VStack(spacing: 12) {
-                    if taskStore.upcomingTasks.isEmpty {
+                VStack(alignment: .leading, spacing: 18) {
+                    if taskStore.activeTasks.isEmpty {
                         EmptyStateView(title: "Your day is clear", subtitle: "Create a task when you’re ready to make progress.")
                     } else {
-                        ForEach(taskStore.upcomingTasks.prefix(3)) { task in
-                            TaskRow(task: task) { taskStore.toggleComplete(task) }
+                        if !todayTasks.isEmpty {
+                            NextUpGroupHeader(title: "Today", count: todayTasks.count, color: .orange)
+                            ForEach(todayTasks.prefix(3)) { task in TaskRow(task: task) { taskStore.toggleComplete(task) } }
+                        }
+                        if !laterTasks.isEmpty {
+                            NextUpGroupHeader(title: "Coming up", count: laterTasks.count, color: AppTheme.blue)
+                            ForEach(laterTasks.prefix(3)) { task in TaskRow(task: task) { taskStore.toggleComplete(task) } }
                         }
                     }
                 }
@@ -98,16 +105,24 @@ struct DashboardView: View {
     }
 
     private var todaySnapshot: some View {
-        HStack(spacing: 0) {
-            SnapshotMetric(value: "\(taskStore.activeTasks.filter(\.isToday).count)", label: "Today", icon: "sun.max.fill", color: .orange)
+        let plannerItems = plannerStore.entries(on: Date.now).filter { $0.entryType != .note }
+        let todayTasks = taskStore.tasks.filter(\.isToday)
+        let completed = plannerItems.filter(\.isComplete).count + todayTasks.filter(\.isComplete).count
+        let total = plannerItems.count + todayTasks.count
+        let progress = total == 0 ? 0 : Int(Double(completed) / Double(total) * 100)
+        return HStack(spacing: 0) {
+            SnapshotMetric(value: "\(total)", label: "Scheduled", icon: "sun.max.fill", color: .orange)
             Divider().frame(height: 42)
-            SnapshotMetric(value: "\(taskStore.completedTasks.count)", label: "Finished", icon: "checkmark.circle.fill", color: AppTheme.success)
+            SnapshotMetric(value: "\(completed)", label: "Finished", icon: "checkmark.circle.fill", color: AppTheme.success)
             Divider().frame(height: 42)
-            SnapshotMetric(value: "\(Int(taskStore.completionProgress * 100))%", label: "Progress", icon: "chart.line.uptrend.xyaxis", color: AppTheme.blue)
+            SnapshotMetric(value: "\(progress)%", label: "Today", icon: "chart.line.uptrend.xyaxis", color: AppTheme.blue)
         }
         .padding(.vertical, 18)
         .background(CardBackground(radius: 22))
     }
+
+    private var todayTasks: [TaskItem] { taskStore.activeTasks.filter(\.isToday).sorted { $0.dueDate < $1.dueDate } }
+    private var laterTasks: [TaskItem] { taskStore.activeTasks.filter { !$0.isToday }.sorted { $0.dueDate < $1.dueDate } }
 
     private var suggestedTask: TaskItem? {
         taskStore.activeTasks.sorted {
@@ -130,6 +145,41 @@ struct DashboardView: View {
         case 5..<12: "Good morning"
         case 12..<17: "Good afternoon"
         default: "Good evening"
+        }
+    }
+}
+
+struct ConsistencyMotivationCard: View {
+    @EnvironmentObject private var plannerStore: PlannerStore
+    var body: some View {
+        HStack(spacing: 16) {
+            ZStack {
+                Circle().fill(Color.orange.opacity(0.14)).frame(width: 52, height: 52)
+                Image(systemName: "flame.fill").font(.system(size: 25, weight: .bold)).foregroundStyle(.orange)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(plannerStore.currentStreak == 0 ? "Start your streak today" : "\(plannerStore.currentStreak)-day consistency streak")
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                Text("Best \(plannerStore.bestStreak) days • 7-day average \(plannerStore.sevenDayAverage)%")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(AppTheme.mutedText)
+            }
+            Spacer()
+            Image(systemName: "chevron.up").font(.system(size: 13, weight: .bold)).foregroundStyle(AppTheme.success)
+        }
+        .padding(18).background(CardBackground(radius: 21))
+    }
+}
+
+struct NextUpGroupHeader: View {
+    let title: String
+    let count: Int
+    let color: Color
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text(title.uppercased()).font(.system(size: 10, weight: .bold)).tracking(1.2)
+            Text("\(count)").font(.system(size: 10, weight: .bold)).foregroundStyle(AppTheme.mutedText)
+            Rectangle().fill(AppTheme.cardBorder).frame(height: 0.5)
         }
     }
 }

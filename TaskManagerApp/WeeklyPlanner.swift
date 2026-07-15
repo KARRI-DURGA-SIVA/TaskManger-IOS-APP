@@ -13,6 +13,7 @@ struct WeeklyPlannerView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     weekHeader
                     weekProgress
+                    ConsistencyGrid(weekStart: weekStart)
                     daySelector
                     dayCanvas
                 }
@@ -23,7 +24,10 @@ struct WeeklyPlannerView: View {
             .navigationTitle("Weekly workspace")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(plannerStore.isSaving ? "Saving…" : "Done") { saveAndClose() }
+                        .disabled(plannerStore.isSaving)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showingComposer = true } label: { Image(systemName: "plus") }
                 }
@@ -34,18 +38,33 @@ struct WeeklyPlannerView: View {
                     .presentationDetents([.large])
             }
             .task(id: weekStart) { await plannerStore.sync(weekStart: weekStart) }
+            .overlay(alignment: .bottom) {
+                if let streak = plannerStore.streakCelebration {
+                    StreakCelebrationBar(streak: streak)
+                        .padding(.horizontal, 24).padding(.bottom, 22)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.spring(response: 0.36, dampingFraction: 0.82), value: plannerStore.streakCelebration)
+        }
+    }
+
+    private func saveAndClose() {
+        Task {
+            _ = await plannerStore.saveWeek(starting: weekStart)
+            dismiss()
         }
     }
 
     private var weekProgress: some View {
-        let activities = plannerStore.activities(inWeekStarting: weekStart)
-        let complete = activities.filter(\.isComplete).count
+        let items = plannerStore.trackableItems(inWeekStarting: weekStart)
+        let complete = items.filter(\.isComplete).count
         let progress = plannerStore.progress(inWeekStarting: weekStart)
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("WEEKLY PROGRESS").font(.system(size: 10, weight: .bold)).tracking(1.3).foregroundStyle(AppTheme.success)
-                    Text(activities.isEmpty ? "Plan your first routine" : "\(complete) of \(activities.count) activities complete")
+                    Text(items.isEmpty ? "Plan your first routine" : "\(complete) of \(items.count) scheduled items complete")
                         .font(.system(size: 16, weight: .bold))
                 }
                 Spacer()
@@ -125,26 +144,174 @@ struct WeeklyPlannerView: View {
                     Button("Add your first block") { showingComposer = true }.font(.system(size: 14, weight: .bold)).foregroundStyle(AppTheme.blue)
                 }.frame(maxWidth: .infinity).padding(.vertical, 38).background(CardBackground(radius: 22))
             } else {
-                ForEach(dayEntries) { entry in
-                    PlannerBlockView(entry: entry)
+                if !pendingEntries.isEmpty {
+                    plannerSectionTitle("TO DO", count: pendingEntries.count, color: AppTheme.blue)
+                    ForEach(pendingEntries) { entry in PlannerBlockView(entry: entry) }
+                }
+                if !completedEntries.isEmpty {
+                    plannerSectionTitle("COMPLETED", count: completedEntries.count, color: AppTheme.success)
+                    ForEach(completedEntries) { entry in PlannerBlockView(entry: entry) }
+                }
+                if !noteEntries.isEmpty {
+                    plannerSectionTitle("NOTES", count: noteEntries.count, color: .orange)
+                    ForEach(noteEntries) { entry in PlannerBlockView(entry: entry) }
                 }
             }
         }
     }
 
+    private func plannerSectionTitle(_ title: String, count: Int, color: Color) -> some View {
+        HStack(spacing: 7) {
+            Text(title).font(.system(size: 10, weight: .bold)).tracking(1.2).foregroundStyle(color)
+            Text("\(count)").font(.system(size: 10, weight: .bold)).foregroundStyle(AppTheme.mutedText)
+            Rectangle().fill(AppTheme.cardBorder).frame(height: 0.5)
+        }.padding(.top, 4)
+    }
+
     private var dayEntries: [PlannerEntry] { plannerStore.entries(on: selectedDay) }
+    private var pendingEntries: [PlannerEntry] { dayEntries.filter { $0.entryType != .note && !$0.isComplete } }
+    private var completedEntries: [PlannerEntry] { dayEntries.filter { $0.entryType != .note && $0.isComplete } }
+    private var noteEntries: [PlannerEntry] { dayEntries.filter { $0.entryType == .note } }
     private var weekDays: [Date] { (0..<7).compactMap { Calendar.current.date(byAdding: .day, value: $0, to: weekStart) } }
     private var weekRange: String {
         guard let end = weekDays.last else { return "" }
         return "\(weekStart.formatted(.dateTime.month(.abbreviated).day())) – \(end.formatted(.dateTime.month(.abbreviated).day()))"
     }
     private var daySubtitle: String {
-        let complete = dayEntries.filter(\.isComplete).count
-        return dayEntries.isEmpty ? selectedDay.formatted(.dateTime.month(.wide).day()) : "\(complete) of \(dayEntries.count) activities complete"
+        let items = dayEntries.filter { $0.entryType != .note }
+        let complete = items.filter(\.isComplete).count
+        return items.isEmpty ? selectedDay.formatted(.dateTime.month(.wide).day()) : "\(complete) of \(items.count) scheduled items complete"
     }
     private func isSelected(_ day: Date) -> Bool { Calendar.current.isDate(day, inSameDayAs: selectedDay) }
     private func moveWeek(_ offset: Int) {
         if let date = Calendar.current.date(byAdding: .day, value: offset * 7, to: weekStart) { weekStart = date; selectedDay = date }
+    }
+}
+
+struct ConsistencyGrid: View {
+    @EnvironmentObject private var plannerStore: PlannerStore
+    let weekStart: Date
+
+    private let dayColumnWidth: CGFloat = 72
+    private let habitColumnWidth: CGFloat = 46
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Label("Consistency grid", systemImage: "square.grid.3x3.fill")
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                    Text("Tap a square only after you finish")
+                        .font(.system(size: 12, weight: .medium)).foregroundStyle(AppTheme.mutedText)
+                }
+                Spacer()
+                Text("\(completedCount)/\(scheduledCount)")
+                    .font(.system(size: 13, weight: .bold)).foregroundStyle(AppTheme.indigo)
+                    .padding(.horizontal, 10).padding(.vertical, 6).background(AppTheme.softBlue, in: Capsule())
+            }
+
+            if habitTitles.isEmpty {
+                Label("Add a multi-day activity to start tracking consistency.", systemImage: "calendar.badge.plus")
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(AppTheme.mutedText)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 10)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        gridHeader
+                        ForEach(weekDays, id: \.self) { day in gridRow(day) }
+                    }
+                }
+            }
+        }
+        .padding(18).background(CardBackground(radius: 22))
+    }
+
+    private var gridHeader: some View {
+        HStack(spacing: 0) {
+            Text("DAY").frame(width: dayColumnWidth, alignment: .leading)
+            ForEach(habitTitles, id: \.self) { title in
+                Image(systemName: symbol(for: title))
+                    .font(.system(size: 13, weight: .bold)).foregroundStyle(AppTheme.indigo)
+                    .frame(width: habitColumnWidth)
+                    .accessibilityLabel(title)
+            }
+            Text("PROGRESS").frame(width: 110, alignment: .leading)
+            Text("NOTES").frame(width: 140, alignment: .leading)
+        }
+        .font(.system(size: 9, weight: .bold)).tracking(0.8).foregroundStyle(AppTheme.mutedText)
+        .padding(.vertical, 10)
+    }
+
+    private func gridRow(_ day: Date) -> some View {
+        let activities = plannerStore.entries(on: day).filter { $0.entryType == .activity }
+        let completed = activities.filter(\.isComplete).count
+        let progress = activities.isEmpty ? 0 : Double(completed) / Double(activities.count)
+        let note = plannerStore.entries(on: day).first { $0.entryType == .note }?.title
+        return HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(day.formatted(.dateTime.weekday(.abbreviated))).font(.system(size: 11, weight: .bold))
+                Text(day.formatted(.dateTime.day())).font(.system(size: 10, weight: .medium)).foregroundStyle(AppTheme.mutedText)
+            }.frame(width: dayColumnWidth, alignment: .leading)
+
+            ForEach(habitTitles, id: \.self) { title in
+                if let entry = activities.first(where: { $0.title == title }) {
+                    Button { plannerStore.toggle(entry) } label: {
+                        Image(systemName: entry.isComplete ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(entry.isComplete ? AppTheme.success : AppTheme.rail)
+                            .frame(width: habitColumnWidth, height: 38)
+                    }.buttonStyle(.plain).accessibilityLabel("\(title), \(entry.isComplete ? "completed" : "not completed")")
+                } else {
+                    Image(systemName: "minus").font(.system(size: 10, weight: .bold)).foregroundStyle(AppTheme.rail.opacity(0.55))
+                        .frame(width: habitColumnWidth, height: 38)
+                }
+            }
+
+            HStack(spacing: 7) {
+                Text("\(Int(progress * 100))%").font(.system(size: 10, weight: .bold)).frame(width: 30, alignment: .trailing)
+                ProgressView(value: progress).tint(progress == 1 ? AppTheme.success : AppTheme.indigo).frame(width: 64)
+            }.frame(width: 110, alignment: .leading)
+            Text(note ?? "—").font(.system(size: 11, weight: .medium)).foregroundStyle(note == nil ? AppTheme.rail : AppTheme.mutedText)
+                .lineLimit(1).frame(width: 140, alignment: .leading)
+        }
+        .frame(height: 45)
+        .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.cardBorder).frame(height: 0.5) }
+    }
+
+    private var weekDays: [Date] {
+        (0..<7).compactMap { Calendar.current.date(byAdding: .day, value: $0, to: weekStart) }
+    }
+    private var habitTitles: [String] {
+        var seen = Set<String>()
+        return weekDays.flatMap { plannerStore.entries(on: $0) }
+            .filter { $0.entryType == .activity }
+            .map(\.title).filter { seen.insert($0).inserted }
+    }
+    private var scheduledCount: Int { weekDays.flatMap { plannerStore.entries(on: $0) }.filter { $0.entryType == .activity }.count }
+    private var completedCount: Int { weekDays.flatMap { plannerStore.entries(on: $0) }.filter { $0.entryType == .activity && $0.isComplete }.count }
+    private func symbol(for title: String) -> String {
+        let symbols = ["checklist", "book.fill", "target", "sparkles", "brain.head.profile", "calendar.badge.checkmark"]
+        return symbols[Int(UInt(bitPattern: title.hashValue) % UInt(symbols.count))]
+    }
+}
+
+struct StreakCelebrationBar: View {
+    let streak: Int
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "flame.fill").font(.system(size: 20, weight: .bold)).foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Activity completed").font(.system(size: 14, weight: .bold))
+                Text(streak == 1 ? "Great start — keep your momentum." : "Your consistency streak is now \(streak) days.")
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(AppTheme.mutedText)
+            }
+            Spacer()
+            Image(systemName: "checkmark.seal.fill").foregroundStyle(AppTheme.success)
+        }
+        .padding(.horizontal, 16).frame(height: 66)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 20).stroke(AppTheme.cardBorder, lineWidth: 0.7) }
+        .shadow(color: .black.opacity(0.16), radius: 18, y: 8)
     }
 }
 
@@ -153,10 +320,13 @@ struct PlannerBlockView: View {
     let entry: PlannerEntry
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            Button { if entry.entryType == .activity { plannerStore.toggle(entry) } } label: {
-                Image(systemName: entry.entryType == .activity && entry.isComplete ? "checkmark.circle.fill" : entry.entryType.iconName)
+            Button { if entry.entryType != .note { plannerStore.toggle(entry) } } label: {
+                Image(systemName: entry.entryType != .note && entry.isComplete ? "checkmark.circle.fill" : entry.entryType.iconName)
                     .font(.system(size: 20, weight: .semibold)).foregroundStyle(blockColor).frame(width: 30, height: 30)
-            }.buttonStyle(.plain).disabled(entry.entryType != .activity)
+            }
+            .buttonStyle(.plain)
+            .disabled(entry.entryType == .note)
+            .accessibilityLabel(entry.isComplete ? "Mark \(entry.title) incomplete" : "Mark \(entry.title) complete")
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text(entry.title).font(.system(size: 16, weight: .bold)).strikethrough(entry.isComplete)

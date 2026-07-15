@@ -32,6 +32,8 @@ Endpoints:
 - `GET /api/planner?email=...&weekStart=...` returns one Sunday–Saturday workspace.
 - `PUT /api/planner/{uuid}` saves a note, event, or checklist activity.
 - `DELETE /api/planner/{uuid}?email=...` removes a planner block.
+- `PUT /api/progress/daily` stores daily completion totals, percentage, and streak history.
+- `GET /api/progress/daily?email=...&start=YYYY-MM-DD&end=YYYY-MM-DD` returns progress history.
 
 ## Amazon S3 object storage
 
