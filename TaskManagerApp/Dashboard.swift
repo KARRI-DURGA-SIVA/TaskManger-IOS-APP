@@ -159,6 +159,15 @@ struct WeeklyWorkspaceCard: View {
                         .frame(maxWidth: .infinity)
                     }
                 }
+                let progress = plannerStore.progress(inWeekStarting: currentWeek.first ?? Date.now)
+                VStack(spacing: 7) {
+                    HStack {
+                        Text("This week’s progress").font(.system(size: 12, weight: .semibold)).foregroundStyle(AppTheme.mutedText)
+                        Spacer()
+                        Text("\(Int(progress * 100))%").font(.system(size: 13, weight: .bold)).foregroundStyle(AppTheme.success)
+                    }
+                    ProgressView(value: progress).tint(AppTheme.success)
+                }
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Plan your week, your way").font(.system(size: 17, weight: .bold, design: .rounded))

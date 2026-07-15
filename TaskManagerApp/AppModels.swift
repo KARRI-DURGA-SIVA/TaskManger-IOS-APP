@@ -269,12 +269,44 @@ final class PlannerStore: ObservableObject {
             .sorted { $0.scheduledAt < $1.scheduledAt }
     }
 
+    var completedActivities: [PlannerEntry] {
+        entries.filter { $0.entryType == .activity && $0.isComplete }
+    }
+
+    func activities(inWeekStarting weekStart: Date) -> [PlannerEntry] {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: weekStart)
+        let end = calendar.date(byAdding: .day, value: 7, to: start) ?? start
+        return entries.filter {
+            $0.entryType == .activity && $0.scheduledAt >= start && $0.scheduledAt < end
+        }
+    }
+
+    func progress(inWeekStarting weekStart: Date) -> Double {
+        let activities = activities(inWeekStarting: weekStart)
+        guard !activities.isEmpty else { return 0 }
+        return Double(activities.filter(\.isComplete).count) / Double(activities.count)
+    }
+
     func add(title: String, details: String, type: PlannerEntryType, scheduledAt: Date) {
         let entry = PlannerEntry(title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                                  details: details.trimmingCharacters(in: .whitespacesAndNewlines),
                                  entryType: type, scheduledAt: scheduledAt)
         entries.append(entry); saveLocal()
         Task { await api.upsertPlannerEntry(entry) }
+    }
+
+    func add(title: String, details: String, type: PlannerEntryType, dates: [Date]) {
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanDetails = details.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newEntries = dates.map {
+            PlannerEntry(title: cleanTitle, details: cleanDetails, entryType: type, scheduledAt: $0)
+        }
+        entries.append(contentsOf: newEntries)
+        saveLocal()
+        Task {
+            for entry in newEntries { await api.upsertPlannerEntry(entry) }
+        }
     }
 
     func toggle(_ entry: PlannerEntry) {
@@ -294,7 +326,9 @@ final class PlannerStore: ObservableObject {
         defer { isSyncing = false }
         if let remote = try? await api.plannerEntries(weekStart: weekStart) {
             let remoteIDs = Set(remote.map(\.id))
-            entries.removeAll { Calendar.current.dateInterval(of: .weekOfYear, for: $0.scheduledAt)?.contains(weekStart) == true && !remoteIDs.contains($0.id) }
+            let start = Calendar.current.startOfDay(for: weekStart)
+            let end = Calendar.current.date(byAdding: .day, value: 7, to: start) ?? start
+            entries.removeAll { $0.scheduledAt >= start && $0.scheduledAt < end && !remoteIDs.contains($0.id) }
             for entry in remote {
                 if let index = entries.firstIndex(where: { $0.id == entry.id }) { entries[index] = entry }
                 else { entries.append(entry) }

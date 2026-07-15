@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AnalysisView: View {
     @EnvironmentObject private var taskStore: TaskStore
+    @EnvironmentObject private var plannerStore: PlannerStore
     @State private var selectedRange: StatsRange = .week
 
     var body: some View {
@@ -40,9 +41,9 @@ struct AnalysisView: View {
                     Divider()
 
                     HStack {
-                        MetricView(value: "\(taskStore.tasks.count)", label: "TOTAL TASKS", color: AppTheme.text)
+                        MetricView(value: "\(totalTracked)", label: "TOTAL ITEMS", color: AppTheme.text)
                         Divider().frame(height: 46)
-                        MetricView(value: "\(Int(taskStore.completionProgress * 100))%", label: "SUCCESS RATE", color: AppTheme.success)
+                        MetricView(value: "\(successRate)%", label: "SUCCESS RATE", color: AppTheme.success)
                         Divider().frame(height: 46)
                         MetricView(value: "\(averagePerDay)", label: "AVG/DAY", color: AppTheme.blue)
                     }
@@ -63,6 +64,7 @@ struct AnalysisView: View {
             .padding(.bottom, 132)
         }
         .background(AppTheme.background)
+        .task { await plannerStore.sync(weekStart: currentSunday) }
     }
 
     private var chartData: (bars: [CGFloat], labels: [String]) {
@@ -91,7 +93,9 @@ struct AnalysisView: View {
             let end = (index + 1) * dates.count / labels.count
             let bucket = dates[start..<end]
             return bucket.reduce(0) { count, day in
-                count + taskStore.completedTasks.filter { calendar.isDate($0.dueDate, inSameDayAs: day) }.count
+                count
+                    + taskStore.completedTasks.filter { calendar.isDate($0.dueDate, inSameDayAs: day) }.count
+                    + plannerStore.completedActivities.filter { calendar.isDate($0.scheduledAt, inSameDayAs: day) }.count
             }
         }
         let maxCount = max(counts.max() ?? 0, 1)
@@ -109,10 +113,15 @@ struct AnalysisView: View {
         let counts = (0..<12).map { offset in
             guard let month = calendar.date(byAdding: .month, value: -11 + offset, to: Date.now) else { return 0 }
             let monthComponents = calendar.dateComponents([.month, .year], from: month)
-            return taskStore.completedTasks.filter {
+            let tasks = taskStore.completedTasks.filter {
                 let taskComponents = calendar.dateComponents([.month, .year], from: $0.dueDate)
                 return taskComponents.month == monthComponents.month && taskComponents.year == monthComponents.year
             }.count
+            let activities = plannerStore.completedActivities.filter {
+                let components = calendar.dateComponents([.month, .year], from: $0.scheduledAt)
+                return components.month == monthComponents.month && components.year == monthComponents.year
+            }.count
+            return tasks + activities
         }
         let maxCount = max(counts.max() ?? 0, 1)
         return (counts.map { max(CGFloat($0) / CGFloat(maxCount), 0.08) }, labels)
@@ -128,7 +137,19 @@ struct AnalysisView: View {
         let calendar = Calendar.current
         let start = calendar.date(byAdding: .day, value: -(days - 1), to: calendar.startOfDay(for: Date.now)) ?? .distantPast
         let completedInRange = taskStore.completedTasks.filter { $0.dueDate >= start && $0.dueDate <= Date.now }.count
+            + plannerStore.completedActivities.filter { $0.scheduledAt >= start && $0.scheduledAt <= Date.now }.count
         return Int(ceil(Double(completedInRange) / Double(days)))
+    }
+
+    private var totalTracked: Int { taskStore.tasks.count + plannerStore.entries.filter { $0.entryType == .activity }.count }
+    private var successRate: Int {
+        guard totalTracked > 0 else { return 0 }
+        return Int((Double(taskStore.completedTasks.count + plannerStore.completedActivities.count) / Double(totalTracked)) * 100)
+    }
+    private var currentSunday: Date {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date.now)
+        return calendar.date(byAdding: .day, value: -(calendar.component(.weekday, from: today) - 1), to: today) ?? today
     }
 }
 

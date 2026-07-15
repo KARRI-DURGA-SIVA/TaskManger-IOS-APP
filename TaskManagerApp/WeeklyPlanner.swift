@@ -12,6 +12,7 @@ struct WeeklyPlannerView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 24) {
                     weekHeader
+                    weekProgress
                     daySelector
                     dayCanvas
                 }
@@ -34,6 +35,27 @@ struct WeeklyPlannerView: View {
             }
             .task(id: weekStart) { await plannerStore.sync(weekStart: weekStart) }
         }
+    }
+
+    private var weekProgress: some View {
+        let activities = plannerStore.activities(inWeekStarting: weekStart)
+        let complete = activities.filter(\.isComplete).count
+        let progress = plannerStore.progress(inWeekStarting: weekStart)
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("WEEKLY PROGRESS").font(.system(size: 10, weight: .bold)).tracking(1.3).foregroundStyle(AppTheme.success)
+                    Text(activities.isEmpty ? "Plan your first routine" : "\(complete) of \(activities.count) activities complete")
+                        .font(.system(size: 16, weight: .bold))
+                }
+                Spacer()
+                Text("\(Int(progress * 100))%")
+                    .font(.system(size: 24, weight: .bold, design: .rounded)).foregroundStyle(AppTheme.success)
+            }
+            ProgressView(value: progress)
+                .tint(AppTheme.success).scaleEffect(x: 1, y: 1.7, anchor: .center)
+        }
+        .padding(18).background(CardBackground(radius: 20))
     }
 
     private var weekHeader: some View {
@@ -159,6 +181,7 @@ struct PlannerComposerView: View {
     @State private var details = ""
     @State private var type: PlannerEntryType = .activity
     @State private var scheduledAt: Date
+    @State private var selectedWeekdays: Set<Int> = []
 
     init(selectedDay: Date) {
         self.selectedDay = selectedDay
@@ -179,16 +202,56 @@ struct PlannerComposerView: View {
                     DatePicker(type == .event ? "Date and time" : "Day", selection: $scheduledAt,
                                displayedComponents: type == .event ? [.date, .hourAndMinute] : [.date])
                 }
+                if type == .activity {
+                    Section("Repeat this activity") {
+                        Text("Choose multiple days to build a consistent weekly routine.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        HStack(spacing: 7) {
+                            ForEach(1...7, id: \.self) { weekday in
+                                Button {
+                                    if selectedWeekdays.contains(weekday) { selectedWeekdays.remove(weekday) }
+                                    else { selectedWeekdays.insert(weekday) }
+                                } label: {
+                                    Text(Calendar.current.veryShortWeekdaySymbols[weekday - 1])
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundStyle(selectedWeekdays.contains(weekday) ? .white : AppTheme.blue)
+                                        .frame(maxWidth: .infinity).frame(height: 36)
+                                        .background(selectedWeekdays.contains(weekday) ? AppTheme.blue : AppTheme.softBlue, in: Circle())
+                                }.buttonStyle(.plain)
+                            }
+                        }
+                        Button(selectedWeekdays.count == 7 ? "Clear all days" : "Select entire week") {
+                            selectedWeekdays = selectedWeekdays.count == 7 ? [] : Set(1...7)
+                        }
+                        .font(.system(size: 13, weight: .bold))
+                    }
+                }
             }
             .navigationTitle("New block").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Save") { plannerStore.add(title: title, details: details, type: type, scheduledAt: scheduledAt); dismiss() }
+                    Button("Save") { save(); dismiss() }
                         .fontWeight(.bold).disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
+    }
+
+    private func save() {
+        guard type == .activity, !selectedWeekdays.isEmpty else {
+            plannerStore.add(title: title, details: details, type: type, scheduledAt: scheduledAt)
+            return
+        }
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: scheduledAt)
+        let sunday = calendar.date(byAdding: .day, value: -(calendar.component(.weekday, from: start) - 1), to: start) ?? start
+        let time = calendar.dateComponents([.hour, .minute], from: scheduledAt)
+        let dates = selectedWeekdays.sorted().compactMap { weekday -> Date? in
+            guard let day = calendar.date(byAdding: .day, value: weekday - 1, to: sunday) else { return nil }
+            return calendar.date(bySettingHour: time.hour ?? 9, minute: time.minute ?? 0, second: 0, of: day)
+        }
+        plannerStore.add(title: title, details: details, type: type, dates: dates)
     }
 }
 
