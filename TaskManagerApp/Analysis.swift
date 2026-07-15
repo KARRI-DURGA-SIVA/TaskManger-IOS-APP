@@ -9,7 +9,7 @@ struct AnalysisView: View {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Analytics")
-                        .font(.system(size: 31, weight: .bold))
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
                     Text(selectedRange.subtitle)
                         .font(.system(size: 14, weight: .semibold))
                 }
@@ -62,6 +62,7 @@ struct AnalysisView: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 132)
         }
+        .background(AppTheme.background)
     }
 
     private var chartData: (bars: [CGFloat], labels: [String]) {

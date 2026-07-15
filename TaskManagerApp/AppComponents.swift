@@ -5,55 +5,55 @@ struct AppTabBar: View {
     @Binding var showingAddTask: Bool
 
     var body: some View {
-        ZStack(alignment: .top) {
-            Rectangle()
-                .fill(AppTheme.surface)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .shadow(color: .black.opacity(0.05), radius: 10, y: -2)
-
-            HStack {
+        ZStack {
+            HStack(spacing: 2) {
                 tabButton(.overview)
                 tabButton(.tasks)
-                Spacer(minLength: 86)
+                Spacer(minLength: 62)
                 tabButton(.stats)
                 tabButton(.settings)
             }
-            .padding(.horizontal, 28)
-            .padding(.top, 28)
+            .padding(.horizontal, 10)
+            .frame(height: 58)
 
             Button {
                 showingAddTask = true
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 34, weight: .medium))
+                    .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 70, height: 70)
-                    .background(AppTheme.blue)
+                    .frame(width: 48, height: 48)
+                    .background(AppTheme.accentGradient)
                     .clipShape(Circle())
-                    .shadow(color: AppTheme.blue.opacity(0.32), radius: 10, y: 8)
+                    .overlay(Circle().stroke(.white.opacity(0.45), lineWidth: 1))
+                    .shadow(color: AppTheme.blue.opacity(0.28), radius: 8, y: 4)
             }
             .buttonStyle(.plain)
-            .offset(y: -18)
+            .offset(y: -8)
         }
-        .frame(height: 104)
-        .background(AppTheme.surface)
-        .ignoresSafeArea(.container, edges: .bottom)
+        .frame(height: 58)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(AppTheme.cardBorder)
+                .frame(height: 0.5)
+        }
     }
 
     private func tabButton(_ tab: AppTab) -> some View {
         Button {
             selectedTab = tab
         } label: {
-            VStack(spacing: 7) {
+            VStack(spacing: 3) {
                 Image(systemName: tab.iconName)
-                    .font(.system(size: 30, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .symbolRenderingMode(.monochrome)
                 Text(tab.rawValue)
-                    .font(.system(size: 13, weight: selectedTab == tab ? .bold : .semibold))
+                    .font(.system(size: 9, weight: selectedTab == tab ? .bold : .medium))
             }
-            .foregroundStyle(selectedTab == tab ? AppTheme.blue : AppTheme.text)
+            .foregroundStyle(selectedTab == tab ? AppTheme.blue : AppTheme.mutedText)
             .frame(maxWidth: .infinity)
-            .frame(height: 62)
+            .frame(height: 48)
         }
         .buttonStyle(.plain)
     }
@@ -93,20 +93,36 @@ struct SectionHeader: View {
 
 struct AvatarView: View {
     let size: CGFloat
+    var imageURL: URL? = nil
 
     var body: some View {
         ZStack {
             Circle()
                 .fill(LinearGradient(colors: [Color(red: 0.91, green: 0.92, blue: 0.94), Color(red: 0.58, green: 0.61, blue: 0.66)], startPoint: .top, endPoint: .bottom))
-            Image(systemName: "person.crop.circle.fill")
-                .resizable()
-                .scaledToFit()
-                .foregroundStyle(.white, Color(red: 0.12, green: 0.22, blue: 0.35))
-                .padding(5)
+            if let imageURL {
+                AsyncImage(url: imageURL) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        avatarPlaceholder
+                    }
+                }
+            } else {
+                avatarPlaceholder
+            }
         }
         .frame(width: size, height: size)
         .overlay(Circle().stroke(.white, lineWidth: 2))
         .shadow(color: .black.opacity(0.12), radius: 3, y: 2)
+        .clipShape(Circle())
+    }
+
+    private var avatarPlaceholder: some View {
+        Image(systemName: "person.crop.circle.fill")
+            .resizable()
+            .scaledToFit()
+            .foregroundStyle(.white, Color(red: 0.12, green: 0.22, blue: 0.35))
+            .padding(5)
     }
 }
 
@@ -116,6 +132,10 @@ struct CardBackground: View {
     var body: some View {
         RoundedRectangle(cornerRadius: radius, style: .continuous)
             .fill(AppTheme.card)
-            .shadow(color: .black.opacity(0.16), radius: 4, y: 2)
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .stroke(AppTheme.cardBorder, lineWidth: 0.7)
+            }
+            .shadow(color: .black.opacity(0.06), radius: 14, y: 6)
     }
 }

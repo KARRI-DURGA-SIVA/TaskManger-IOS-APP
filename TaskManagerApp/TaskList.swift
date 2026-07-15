@@ -13,7 +13,7 @@ struct TaskListView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Tasks")
-                            .font(.system(size: 31, weight: .bold))
+                            .font(.system(size: 32, weight: .bold, design: .rounded))
                         Text(settings.focusMode ? "Focus Mode: high priority first" : "\(taskStore.activeTasks.count) active tasks")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(AppTheme.mutedText)
@@ -66,12 +66,6 @@ struct TaskListView: View {
                     }
                     .padding(.bottom, 12)
                 }
-                .overlay(alignment: .bottomLeading) {
-                    Capsule()
-                        .fill(.black.opacity(0.24))
-                        .frame(width: 334, height: 7)
-                        .padding(.leading, -20)
-                }
 
                 if filteredTasks.isEmpty {
                     EmptyStateView(title: searchText.isEmpty ? "No \(selectedFilter.lowercased()) tasks" : "No matching tasks", subtitle: "Tap plus to create a task with date, priority, category, and reminder.")
@@ -87,6 +81,7 @@ struct TaskListView: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 132)
         }
+        .background(AppTheme.background)
     }
 
     private var filteredTasks: [TaskItem] {
@@ -177,12 +172,14 @@ struct TaskRow: View {
     let title: String
     let subtitle: String
     var isComplete = false
+    var priority: PriorityLevel?
     var onToggle: () -> Void = {}
 
     init(task: TaskItem, onToggle: @escaping () -> Void = {}) {
         self.title = task.title
         self.subtitle = task.subtitle
         self.isComplete = task.isComplete
+        self.priority = task.priority
         self.onToggle = onToggle
     }
 
@@ -190,11 +187,15 @@ struct TaskRow: View {
         self.title = title
         self.subtitle = subtitle
         self.isComplete = isComplete
+        self.priority = nil
         self.onToggle = onToggle
     }
 
     var body: some View {
         HStack(spacing: 16) {
+            Capsule()
+                .fill(priorityColor)
+                .frame(width: 4, height: 38)
             Button(action: onToggle) {
                 Image(systemName: isComplete ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 25, weight: .semibold))
@@ -212,13 +213,23 @@ struct TaskRow: View {
                     .minimumScaleFactor(0.8)
                 Text(subtitle)
                     .font(.system(size: 13))
-                    .foregroundStyle(isComplete ? AppTheme.mutedText : AppTheme.text)
+                    .foregroundStyle(AppTheme.mutedText)
+                    .lineLimit(1)
             }
             Spacer()
         }
         .padding(.horizontal, 18)
         .frame(height: 74)
         .background(CardBackground(radius: 16))
+    }
+
+    private var priorityColor: Color {
+        switch priority {
+        case .high: .red
+        case .medium: .orange
+        case .low: AppTheme.success
+        case nil: AppTheme.blue
+        }
     }
 }
 

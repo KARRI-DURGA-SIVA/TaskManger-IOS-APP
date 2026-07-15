@@ -141,7 +141,7 @@ struct AddTaskView: View {
                     .padding(.top, 34)
                 }
             }
-            .navigationTitle("New Task")
+            .navigationTitle("Create Task")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 category = taskStore.categories.contains(settings.defaultCategory)
@@ -156,7 +156,7 @@ struct AddTaskView: View {
                         .font(.system(size: 16, weight: .semibold))
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Add") {
+                    Button("Create") {
                         taskStore.addTask(
                             title: title,
                             description: description,
