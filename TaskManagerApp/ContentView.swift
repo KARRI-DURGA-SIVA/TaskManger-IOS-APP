@@ -118,6 +118,8 @@ struct AuthView: View {
     @State private var name = ""
     @State private var email = ""
     @State private var password = ""
+    @State private var isSigningInWithGoogle = false
+    @State private var googleSignInError: String?
 
     var body: some View {
         ZStack {
@@ -189,12 +191,20 @@ struct AuthView: View {
                 .buttonStyle(.plain)
                 .disabled(!canSubmit)
 
-                GoogleSignInButton {
+                GoogleSignInButton(isLoading: isSigningInWithGoogle) {
                     signInWithGoogle()
                 }
             }
             .frame(maxWidth: 420)
             .padding(.horizontal, 24)
+        }
+        .alert("Google Sign-In", isPresented: Binding(
+            get: { googleSignInError != nil },
+            set: { if !$0 { googleSignInError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(googleSignInError ?? "Unable to sign in with Google.")
         }
     }
 
@@ -205,11 +215,13 @@ struct AuthView: View {
     }
 
     private func signInWithGoogle() {
+        guard !isSigningInWithGoogle else { return }
+
         guard
             let clientID = Bundle.main.object(forInfoDictionaryKey: "GIDClientID") as? String,
-            !clientID.isEmpty
+            !clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
-            print("Missing GIDClientID. Add your Google iOS client ID to Info.plist before using Google Sign-In.")
+            googleSignInError = "Google Sign-In is not configured yet. Add GIDClientID and the reversed client ID URL scheme to the app target."
             return
         }
 
@@ -220,16 +232,38 @@ struct AuthView: View {
             .flatMap(\.windows)
             .first(where: \.isKeyWindow)?
             .rootViewController
-        else { return }
+        else {
+            googleSignInError = "The Google account window could not be opened. Please try again."
+            return
+        }
 
+        isSigningInWithGoogle = true
+
+        // Clear the SDK session so tapping the button always presents Google's
+        // account chooser instead of silently reusing the previous account.
+        GIDSignIn.sharedInstance.signOut()
         GIDSignIn.sharedInstance.signIn(withPresenting: rootViewController) { result, error in
-            guard error == nil, let profile = result?.user.profile else { return }
             Task { @MainActor in
+                isSigningInWithGoogle = false
+
+                if let error {
+                    let signInError = error as NSError
+                    if signInError.code != GIDSignInError.canceled.rawValue {
+                        googleSignInError = signInError.localizedDescription
+                    }
+                    return
+                }
+
+                guard let profile = result?.user.profile else {
+                    googleSignInError = "Google did not return an account profile. Please try another account."
+                    return
+                }
+
                 authStore.signIn(
                     name: profile.name,
                     email: profile.email,
                     password: "google-oauth",
-                    mode: isSignUp ? .signUp : .signIn
+                    mode: .signIn
                 )
             }
         }
@@ -237,19 +271,25 @@ struct AuthView: View {
 }
 
 struct GoogleSignInButton: View {
+    let isLoading: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                Text("G")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(Color(red: 0.91, green: 0.25, blue: 0.20))
-                    .frame(width: 28, height: 28)
-                    .background(.white)
-                    .clipShape(Circle())
+                if isLoading {
+                    ProgressView()
+                        .frame(width: 28, height: 28)
+                } else {
+                    Text("G")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(Color(red: 0.91, green: 0.25, blue: 0.20))
+                        .frame(width: 28, height: 28)
+                        .background(.white)
+                        .clipShape(Circle())
+                }
 
-                Text("Continue with Google")
+                Text(isLoading ? "Opening Google..." : "Continue with Google")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(AppTheme.text)
             }
@@ -263,6 +303,7 @@ struct GoogleSignInButton: View {
             }
         }
         .buttonStyle(.plain)
+        .disabled(isLoading)
     }
 }
 
