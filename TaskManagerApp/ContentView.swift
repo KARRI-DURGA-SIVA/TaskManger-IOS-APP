@@ -5,6 +5,7 @@ struct ContentView: View {
     @StateObject private var authStore = AuthStore()
     @StateObject private var taskStore = TaskStore()
     @StateObject private var settings = AppSettings()
+    @StateObject private var plannerStore = PlannerStore()
     @State private var isLoading = true
 
     var body: some View {
@@ -16,6 +17,7 @@ struct ContentView: View {
                     .environmentObject(authStore)
                     .environmentObject(taskStore)
                     .environmentObject(settings)
+                    .environmentObject(plannerStore)
             } else {
                 AuthView()
                     .environmentObject(authStore)
@@ -43,13 +45,13 @@ struct MainAppView: View {
     @EnvironmentObject private var settings: AppSettings
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             AppTheme.background.ignoresSafeArea()
 
             Group {
                 switch selectedTab {
                 case .overview:
-                    DashboardView()
+                    DashboardView(onViewTasks: { selectedTab = .tasks })
                 case .tasks:
                     TaskListView()
                 case .stats:
@@ -60,6 +62,8 @@ struct MainAppView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             AppTabBar(selectedTab: $selectedTab, showingAddTask: $showingNewTask)
         }
         .sheet(isPresented: $showingNewTask) {
@@ -120,6 +124,7 @@ struct AuthView: View {
     @State private var password = ""
     @State private var isSigningInWithGoogle = false
     @State private var googleSignInError: String?
+    @State private var isAuthenticating = false
 
     var body: some View {
         ZStack {
@@ -178,9 +183,17 @@ struct AuthView: View {
 
                 Button {
                     let fallbackName = email.components(separatedBy: "@").first ?? ""
-                    authStore.signIn(name: isSignUp ? name : fallbackName, email: email, password: password, mode: isSignUp ? .signUp : .signIn)
+                    isAuthenticating = true
+                    Task {
+                        do {
+                            try await authStore.signIn(name: isSignUp ? name : fallbackName, email: email, password: password, mode: isSignUp ? .signUp : .signIn)
+                        } catch {
+                            googleSignInError = error.localizedDescription
+                        }
+                        isAuthenticating = false
+                    }
                 } label: {
-                    Text(isSignUp ? "Sign Up" : "Sign In")
+                    Text(isAuthenticating ? "Connecting..." : (isSignUp ? "Sign Up" : "Sign In"))
                         .font(.system(size: 17, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
@@ -189,7 +202,7 @@ struct AuthView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .disabled(!canSubmit)
+                .disabled(!canSubmit || isAuthenticating)
 
                 GoogleSignInButton(isLoading: isSigningInWithGoogle) {
                     signInWithGoogle()
@@ -259,12 +272,16 @@ struct AuthView: View {
                     return
                 }
 
-                authStore.signIn(
-                    name: profile.name,
-                    email: profile.email,
-                    password: "google-oauth",
-                    mode: .signIn
-                )
+                do {
+                    try await authStore.signIn(
+                        name: profile.name,
+                        email: profile.email,
+                        password: "google-oauth",
+                        mode: .signIn
+                    )
+                } catch {
+                    googleSignInError = error.localizedDescription
+                }
             }
         }
     }

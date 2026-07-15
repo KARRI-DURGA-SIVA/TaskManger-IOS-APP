@@ -42,6 +42,26 @@ struct TaskItem: Identifiable, Codable, Equatable {
     }()
 }
 
+enum PlannerEntryType: String, CaseIterable, Codable {
+    case activity = "Activity"
+    case event = "Event"
+    case note = "Note"
+
+    var iconName: String {
+        switch self { case .activity: "checkmark.circle"; case .event: "calendar"; case .note: "note.text" }
+    }
+}
+
+struct PlannerEntry: Identifiable, Codable, Equatable {
+    var id = UUID()
+    var title: String
+    var details: String
+    var entryType: PlannerEntryType
+    var scheduledAt: Date
+    var isComplete = false
+    var createdAt = Date()
+}
+
 struct CategorySummary: Identifiable {
     var id: String { name }
     let name: String
@@ -118,7 +138,7 @@ final class TaskStore: ObservableObject {
 
     let categories = ["Work", "Personal", "Health", "Learning", "Finance"]
     private let storageKey = "task-manager.tasks"
-    private let syncClient = NeonTaskSyncClient()
+    private let syncClient = SpringBootAPIClient()
 
     init() {
         load()
@@ -236,6 +256,64 @@ final class TaskStore: ObservableObject {
 }
 
 @MainActor
+final class PlannerStore: ObservableObject {
+    @Published private(set) var entries: [PlannerEntry] = []
+    @Published private(set) var isSyncing = false
+    private let storageKey = "task-manager.planner-entries"
+    private let api = SpringBootAPIClient()
+
+    init() { loadLocal() }
+
+    func entries(on day: Date) -> [PlannerEntry] {
+        entries.filter { Calendar.current.isDate($0.scheduledAt, inSameDayAs: day) }
+            .sorted { $0.scheduledAt < $1.scheduledAt }
+    }
+
+    func add(title: String, details: String, type: PlannerEntryType, scheduledAt: Date) {
+        let entry = PlannerEntry(title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                                 details: details.trimmingCharacters(in: .whitespacesAndNewlines),
+                                 entryType: type, scheduledAt: scheduledAt)
+        entries.append(entry); saveLocal()
+        Task { await api.upsertPlannerEntry(entry) }
+    }
+
+    func toggle(_ entry: PlannerEntry) {
+        guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        entries[index].isComplete.toggle(); saveLocal()
+        let updated = entries[index]
+        Task { await api.upsertPlannerEntry(updated) }
+    }
+
+    func delete(_ entry: PlannerEntry) {
+        entries.removeAll { $0.id == entry.id }; saveLocal()
+        Task { await api.deletePlannerEntry(entry.id) }
+    }
+
+    func sync(weekStart: Date) async {
+        isSyncing = true
+        defer { isSyncing = false }
+        if let remote = try? await api.plannerEntries(weekStart: weekStart) {
+            let remoteIDs = Set(remote.map(\.id))
+            entries.removeAll { Calendar.current.dateInterval(of: .weekOfYear, for: $0.scheduledAt)?.contains(weekStart) == true && !remoteIDs.contains($0.id) }
+            for entry in remote {
+                if let index = entries.firstIndex(where: { $0.id == entry.id }) { entries[index] = entry }
+                else { entries.append(entry) }
+            }
+            saveLocal()
+        }
+    }
+
+    private func loadLocal() {
+        guard let data = UserDefaults.standard.data(forKey: storageKey),
+              let decoded = try? JSONDecoder().decode([PlannerEntry].self, from: data) else { return }
+        entries = decoded
+    }
+    private func saveLocal() {
+        if let data = try? JSONEncoder().encode(entries) { UserDefaults.standard.set(data, forKey: storageKey) }
+    }
+}
+
+@MainActor
 final class AppSettings: ObservableObject {
     @Published var notificationsEnabled: Bool {
         didSet {
@@ -333,40 +411,74 @@ final class AuthStore: ObservableObject {
     @Published private(set) var isAuthenticated: Bool
     @Published private(set) var userName: String
     @Published private(set) var email: String
+    @Published private(set) var profileImageURL: URL?
 
     private let nameKey = "task-manager.user-name"
     private let emailKey = "task-manager.user-email"
-    private let syncClient = NeonTaskSyncClient()
+    private let syncClient = SpringBootAPIClient()
 
     init() {
         let storedName = UserDefaults.standard.string(forKey: nameKey) ?? ""
         let storedEmail = UserDefaults.standard.string(forKey: emailKey) ?? ""
         userName = storedName
         email = storedEmail
+        profileImageURL = nil
         isAuthenticated = !storedName.isEmpty
+        if isAuthenticated {
+            Task { [weak self] in await self?.restoreBackendSession() }
+        }
     }
 
-    func signIn(name: String, email: String, password: String, mode: AuthMode) {
+    func signIn(name: String, email: String, password: String, mode: AuthMode) async throws {
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
-        userName = cleanName.isEmpty ? "Task Manager User" : cleanName
-        self.email = cleanEmail
+        let requestedName = cleanName.isEmpty ? "Task Manager User" : cleanName
+        let account = AuthAccount(name: requestedName, email: cleanEmail, password: password, mode: mode.rawValue)
+        let authenticatedUser = try await syncClient.authenticate(account: account)
+
+        userName = authenticatedUser.name
+        self.email = authenticatedUser.email
         isAuthenticated = true
         UserDefaults.standard.set(userName, forKey: nameKey)
-        UserDefaults.standard.set(cleanEmail, forKey: emailKey)
-
-        let account = AuthAccount(name: userName, email: cleanEmail, password: password, mode: mode.rawValue)
-        Task {
-            await syncClient.syncAuth(account: account)
-        }
+        UserDefaults.standard.set(authenticatedUser.email, forKey: emailKey)
+        await refreshProfileImage()
     }
 
     func signOut() {
         userName = ""
         email = ""
         isAuthenticated = false
+        profileImageURL = nil
         UserDefaults.standard.removeObject(forKey: nameKey)
         UserDefaults.standard.removeObject(forKey: emailKey)
+    }
+
+    func uploadProfileImage(data: Data, contentType: String, fileExtension: String) async throws {
+        guard !email.isEmpty else { throw SpringBootAPIClient.APIError.authenticationFailed("Sign in before uploading a profile image.") }
+        profileImageURL = try await syncClient.uploadProfileImage(
+            data: data,
+            ownerEmail: email,
+            contentType: contentType,
+            fileExtension: fileExtension
+        )
+    }
+
+    func refreshProfileImage() async {
+        guard !email.isEmpty else { return }
+        profileImageURL = try? await syncClient.profileImageURL(ownerEmail: email)
+    }
+
+    private func restoreBackendSession() async {
+        do {
+            let user = try await syncClient.validateSession(email: email)
+            userName = user.name
+            email = user.email
+            await refreshProfileImage()
+        } catch {
+            // Old app versions trusted UserDefaults without creating a backend
+            // account. Clear that stale state and require a real sign-in once.
+            signOut()
+        }
     }
 }
 
@@ -383,62 +495,248 @@ struct AuthAccount: Codable {
     var signedAt = Date()
 }
 
-struct NeonTaskSyncClient {
-    private var endpoint: URL? {
-        guard
-            let value = Bundle.main.object(forInfoDictionaryKey: "NEON_SYNC_URL") as? String,
-            !value.isEmpty
-        else { return nil }
-        return URL(string: value)
+struct SpringBootAPIClient {
+    private var baseURL: URL? {
+        let configuredURL = Bundle.main.object(forInfoDictionaryKey: "SPRING_BOOT_API_URL") as? String
+        return URL(string: configuredURL?.isEmpty == false ? configuredURL! : "http://localhost:8080/api")
     }
 
     func upsert(task: TaskItem) async {
-        await send(kind: "task.upsert", payload: task)
+        guard let email = UserDefaults.standard.string(forKey: "task-manager.user-email"), !email.isEmpty else { return }
+        let payload = TaskUpsertPayload(ownerEmail: email, task: task)
+        await send(path: "tasks/\(task.id.uuidString)", method: "PUT", payload: payload)
     }
 
-    func syncAuth(account: AuthAccount) async {
-        await send(kind: "auth.account", payload: account)
+    func authenticate(account: AuthAccount) async throws -> AuthResponse {
+        guard let endpoint = baseURL?.appending(path: "auth") else { throw APIError.invalidURL }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(account)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw APIError.authenticationFailed(httpResponse.statusCode == 401 ? "Incorrect email or password." : "Unable to authenticate with the server.")
+        }
+        return try JSONDecoder().decode(AuthResponse.self, from: data)
     }
 
-    private func send<T: Encodable>(kind: String, payload: T) async {
-        guard let endpoint else { return }
+    func validateSession(email: String) async throws -> AuthResponse {
+        guard var components = URLComponents(url: baseURL?.appending(path: "auth/session") ?? URL(fileURLWithPath: ""), resolvingAgainstBaseURL: false) else {
+            throw APIError.invalidURL
+        }
+        components.queryItems = [URLQueryItem(name: "email", value: email)]
+        guard let url = components.url else { throw APIError.invalidURL }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            throw APIError.authenticationFailed("Your saved session is no longer valid.")
+        }
+        return try JSONDecoder().decode(AuthResponse.self, from: data)
+    }
+
+    func uploadProfileImage(data: Data, ownerEmail: String, contentType: String, fileExtension: String) async throws -> URL {
+        let fileName = "profile-\(UUID().uuidString).\(fileExtension)"
+        let uploadRequest = UploadURLRequest(ownerEmail: ownerEmail, fileName: fileName, contentType: contentType)
+        let upload: UploadURLResponse = try await request(path: "storage/upload-url", method: "POST", payload: uploadRequest)
+        guard let uploadURL = URL(string: upload.uploadUrl) else { throw APIError.invalidURL }
+
+        var s3Request = URLRequest(url: uploadURL)
+        s3Request.httpMethod = "PUT"
+        s3Request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        let (_, uploadResponse) = try await URLSession.shared.upload(for: s3Request, from: data)
+        guard let httpResponse = uploadResponse as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            throw APIError.uploadFailed
+        }
+
+        let saveRequest = ProfileImageRequest(ownerEmail: ownerEmail, objectKey: upload.objectKey)
+        let _: ObjectKeyResponse = try await request(path: "storage/profile-image", method: "PUT", payload: saveRequest)
+        guard let url = try await profileImageURL(ownerEmail: ownerEmail) else { throw APIError.invalidResponse }
+        return url
+    }
+
+    func profileImageURL(ownerEmail: String) async throws -> URL? {
+        guard var components = URLComponents(url: baseURL?.appending(path: "storage/profile-image-url") ?? URL(fileURLWithPath: ""), resolvingAgainstBaseURL: false) else {
+            throw APIError.invalidURL
+        }
+        components.queryItems = [URLQueryItem(name: "email", value: ownerEmail)]
+        guard let url = components.url else { throw APIError.invalidURL }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
+            throw APIError.invalidResponse
+        }
+        let result = try JSONDecoder().decode(ProfileImageURLResponse.self, from: data)
+        guard let value = result.downloadUrl else { return nil }
+        return URL(string: value)
+    }
+
+    func plannerEntries(weekStart: Date) async throws -> [PlannerEntry] {
+        guard let email = UserDefaults.standard.string(forKey: "task-manager.user-email"), !email.isEmpty,
+              var components = URLComponents(url: baseURL?.appending(path: "planner") ?? URL(fileURLWithPath: ""), resolvingAgainstBaseURL: false) else {
+            throw APIError.invalidURL
+        }
+        components.queryItems = [
+            URLQueryItem(name: "email", value: email),
+            URLQueryItem(name: "weekStart", value: Self.isoFormatter.string(from: weekStart))
+        ]
+        guard let url = components.url else { throw APIError.invalidURL }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw APIError.invalidResponse }
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode([PlannerEntry].self, from: data)
+    }
+
+    func upsertPlannerEntry(_ entry: PlannerEntry) async {
+        guard let email = UserDefaults.standard.string(forKey: "task-manager.user-email"), !email.isEmpty else { return }
+        let payload = PlannerPayload(ownerEmail: email, entry: entry)
+        await send(path: "planner/\(entry.id.uuidString)", method: "PUT", payload: payload)
+    }
+
+    func deletePlannerEntry(_ id: UUID) async {
+        guard let email = UserDefaults.standard.string(forKey: "task-manager.user-email"), !email.isEmpty,
+              var components = URLComponents(url: baseURL?.appending(path: "planner/\(id.uuidString)") ?? URL(fileURLWithPath: ""), resolvingAgainstBaseURL: false) else { return }
+        components.queryItems = [URLQueryItem(name: "email", value: email)]
+        guard let url = components.url else { return }
+        var request = URLRequest(url: url); request.httpMethod = "DELETE"
+        _ = try? await URLSession.shared.data(for: request)
+    }
+
+    private func request<Request: Encodable, Response: Decodable>(path: String, method: String, payload: Request) async throws -> Response {
+        guard let endpoint = baseURL?.appending(path: path) else { throw APIError.invalidURL }
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(payload)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw APIError.serverError(statusCode: httpResponse.statusCode, message: serverMessage(from: data))
+        }
+        return try JSONDecoder().decode(Response.self, from: data)
+    }
+
+    private func serverMessage(from data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return (object["detail"] as? String) ?? (object["message"] as? String) ?? (object["error"] as? String)
+    }
+
+    private func send<T: Encodable>(path: String, method: String, payload: T) async {
+        guard let endpoint = baseURL?.appending(path: path) else { return }
 
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
-            let body = SyncEnvelope(kind: kind, payload: payload)
             var request = URLRequest(url: endpoint)
-            request.httpMethod = "POST"
+            request.httpMethod = method
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try encoder.encode(body)
+            request.httpBody = try encoder.encode(payload)
             let (_, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse,
                   (200..<300).contains(httpResponse.statusCode) else {
-                print("Neon sync failed: server returned an unsuccessful response")
+                print("Spring Boot sync failed: server returned an unsuccessful response")
                 return
             }
         } catch {
-            print("Neon sync failed: \(error.localizedDescription)")
+            print("Spring Boot sync failed: \(error.localizedDescription)")
         }
     }
 
-    private struct SyncEnvelope<T: Encodable>: Encodable {
-        var kind: String
-        var payload: T
+    private struct TaskUpsertPayload: Encodable {
+        let ownerEmail: String
+        let title: String
+        let description: String
+        let dueDate: Date
+        let priority: String
+        let category: String
+        let reminderEnabled: Bool
+        let isComplete: Bool
+        let createdAt: Date
+
+        init(ownerEmail: String, task: TaskItem) {
+            self.ownerEmail = ownerEmail
+            title = task.title
+            description = task.description
+            dueDate = task.dueDate
+            priority = task.priority.rawValue
+            category = task.category
+            reminderEnabled = task.reminderEnabled
+            isComplete = task.isComplete
+            createdAt = task.createdAt
+        }
+    }
+
+    private struct PlannerPayload: Encodable {
+        let ownerEmail: String
+        let title: String
+        let details: String
+        let entryType: String
+        let scheduledAt: Date
+        let isComplete: Bool
+        let createdAt: Date
+        init(ownerEmail: String, entry: PlannerEntry) {
+            self.ownerEmail = ownerEmail; title = entry.title; details = entry.details
+            entryType = entry.entryType.rawValue; scheduledAt = entry.scheduledAt
+            isComplete = entry.isComplete; createdAt = entry.createdAt
+        }
+    }
+
+    private static let isoFormatter = ISO8601DateFormatter()
+
+    struct AuthResponse: Decodable {
+        let id: Int
+        let name: String
+        let email: String
+        let provider: String
+    }
+
+    private struct UploadURLRequest: Encodable { let ownerEmail: String; let fileName: String; let contentType: String }
+    private struct UploadURLResponse: Decodable { let uploadUrl: String; let objectKey: String; let contentType: String }
+    private struct ProfileImageRequest: Encodable { let ownerEmail: String; let objectKey: String }
+    private struct ObjectKeyResponse: Decodable { let objectKey: String }
+    private struct ProfileImageURLResponse: Decodable { let downloadUrl: String?; let objectKey: String? }
+
+    enum APIError: LocalizedError {
+        case invalidURL
+        case invalidResponse
+        case authenticationFailed(String)
+        case uploadFailed
+        case serverError(statusCode: Int, message: String?)
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidURL: "The backend URL is invalid."
+            case .invalidResponse: "The backend returned an invalid response."
+            case .authenticationFailed(let message): message
+            case .uploadFailed: "The image could not be uploaded to Amazon S3."
+            case .serverError(let statusCode, let message):
+                if statusCode == 401 {
+                    "Your backend session is not valid. Sign out, create/sign in to your account again, and retry."
+                } else if statusCode == 403 {
+                    "The backend or S3 denied access. Check the IAM permissions for this bucket."
+                } else {
+                    message ?? "The backend returned HTTP \(statusCode)."
+                }
+            }
+        }
     }
 }
 
 enum AppTheme {
-    static let blue = Color(red: 0.02, green: 0.47, blue: 0.98)
+    static let blue = Color(red: 0.20, green: 0.36, blue: 0.92)
+    static let indigo = Color(red: 0.42, green: 0.24, blue: 0.88)
+    static let accentGradient = LinearGradient(colors: [blue, indigo], startPoint: .topLeading, endPoint: .bottomTrailing)
     static let background = Color(UIColor { traits in
         traits.userInterfaceStyle == .dark
             ? UIColor(red: 0.06, green: 0.07, blue: 0.10, alpha: 1)
-            : UIColor(red: 0.94, green: 0.95, blue: 0.97, alpha: 1)
+            : UIColor(red: 0.965, green: 0.97, blue: 0.985, alpha: 1)
     })
     static let card = Color(UIColor { traits in
         traits.userInterfaceStyle == .dark
             ? UIColor(red: 0.12, green: 0.13, blue: 0.17, alpha: 1)
-            : UIColor(red: 0.985, green: 0.985, blue: 0.995, alpha: 1)
+            : UIColor.white
     })
     static let surface = Color(UIColor { traits in
         traits.userInterfaceStyle == .dark
@@ -454,4 +752,9 @@ enum AppTheme {
     static let softGreen = Color(red: 0.88, green: 0.96, blue: 0.91)
     static let success = Color(red: 0.12, green: 0.78, blue: 0.36)
     static let rail = Color(UIColor.separator).opacity(0.65)
+    static let cardBorder = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor.white.withAlphaComponent(0.07)
+            : UIColor(red: 0.84, green: 0.86, blue: 0.92, alpha: 0.55)
+    })
 }
