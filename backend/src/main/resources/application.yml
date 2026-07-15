@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: task-manager-api
+  datasource:
+    url: ${DB_URL:jdbc:h2:file:./data/taskmanager;MODE=PostgreSQL;AUTO_SERVER=TRUE}
+    username: ${DB_USERNAME:sa}
+    password: ${DB_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+server:
+  port: ${PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+app:
+  storage:
+    bucket: ${S3_BUCKET:taskmanager-user-files-durgasiva}
+    region: ${AWS_REGION:ap-southeast-2}
+    upload-url-minutes: ${S3_UPLOAD_URL_MINUTES:10}
