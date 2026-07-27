@@ -636,8 +636,17 @@ struct AuthAccount: Codable {
 
 struct SpringBootAPIClient {
     private var baseURL: URL? {
-        let configuredURL = Bundle.main.object(forInfoDictionaryKey: "SPRING_BOOT_API_URL") as? String
-        return URL(string: configuredURL?.isEmpty == false ? configuredURL! : "http://localhost:8080/api")
+        let configuredURL = (Bundle.main.object(forInfoDictionaryKey: "SPRING_BOOT_API_URL") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = configuredURL.flatMap { $0.isEmpty ? nil : $0 } ?? "http://localhost:8080/api"
+
+        guard let url = URL(string: value),
+              let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              url.host != nil else {
+            return nil
+        }
+        return url
     }
 
     func upsert(task: TaskItem) async {
@@ -663,7 +672,8 @@ struct SpringBootAPIClient {
     }
 
     func validateSession(email: String) async throws -> AuthResponse {
-        guard var components = URLComponents(url: baseURL?.appending(path: "auth/session") ?? URL(fileURLWithPath: ""), resolvingAgainstBaseURL: false) else {
+        guard let endpoint = baseURL?.appending(path: "auth/session"),
+              var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
             throw APIError.invalidURL
         }
         components.queryItems = [URLQueryItem(name: "email", value: email)]
@@ -698,7 +708,8 @@ struct SpringBootAPIClient {
     }
 
     func profileImageURL(ownerEmail: String) async throws -> URL? {
-        guard var components = URLComponents(url: baseURL?.appending(path: "storage/profile-image-url") ?? URL(fileURLWithPath: ""), resolvingAgainstBaseURL: false) else {
+        guard let endpoint = baseURL?.appending(path: "storage/profile-image-url"),
+              var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
             throw APIError.invalidURL
         }
         components.queryItems = [URLQueryItem(name: "email", value: ownerEmail)]
@@ -714,7 +725,8 @@ struct SpringBootAPIClient {
 
     func plannerEntries(weekStart: Date) async throws -> [PlannerEntry] {
         guard let email = UserDefaults.standard.string(forKey: "task-manager.user-email"), !email.isEmpty,
-              var components = URLComponents(url: baseURL?.appending(path: "planner") ?? URL(fileURLWithPath: ""), resolvingAgainstBaseURL: false) else {
+              let endpoint = baseURL?.appending(path: "planner"),
+              var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
             throw APIError.invalidURL
         }
         components.queryItems = [
@@ -736,7 +748,8 @@ struct SpringBootAPIClient {
 
     func deletePlannerEntry(_ id: UUID) async {
         guard let email = UserDefaults.standard.string(forKey: "task-manager.user-email"), !email.isEmpty,
-              var components = URLComponents(url: baseURL?.appending(path: "planner/\(id.uuidString)") ?? URL(fileURLWithPath: ""), resolvingAgainstBaseURL: false) else { return }
+              let endpoint = baseURL?.appending(path: "planner/\(id.uuidString)"),
+              var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else { return }
         components.queryItems = [URLQueryItem(name: "email", value: email)]
         guard let url = components.url else { return }
         var request = URLRequest(url: url); request.httpMethod = "DELETE"
