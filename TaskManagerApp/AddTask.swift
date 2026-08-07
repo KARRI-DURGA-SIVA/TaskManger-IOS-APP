@@ -18,6 +18,10 @@ struct AddTaskView: View {
         case description
     }
 
+    private var canCreateTask: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && dueDate >= Date()
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -59,21 +63,20 @@ struct AddTaskView: View {
                                         Image(systemName: "calendar")
                                             .foregroundStyle(AppTheme.blue)
                                     }
-                                DatePicker("Date & Time", selection: $dueDate)
-                                    .font(.system(size: 16, weight: .bold))
-                            }
+                            DatePicker("Date & Time", selection: $dueDate)
+                                .font(.system(size: 16, weight: .bold))
                         }
                         .padding(.horizontal, 18)
                         .frame(height: 82)
                         .background(CardBackground(radius: 18))
 
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Priority")
-                                    .font(.system(size: 16, weight: .bold))
-                                Text(priority.rawValue)
-                                    .font(.system(size: 14))
-                            }
+                        if dueDate < Date() {
+                            Text("Please choose a due date and time in the future.")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.red)
+                                .padding(.horizontal, 18)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                             Spacer()
                             HStack(spacing: 8) {
                                 ForEach(PriorityLevel.allCases, id: \.self) { level in
@@ -167,8 +170,8 @@ struct AddTaskView: View {
                         )
                         dismiss()
                     }
-                        .font(.system(size: 16, weight: .semibold))
-                        .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .font(.system(size: 16, weight: .semibold))
+                    .disabled(!canCreateTask)
                 }
             }
         }

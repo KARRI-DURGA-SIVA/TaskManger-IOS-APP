@@ -160,9 +160,9 @@ struct TaskSection: View {
                 .font(.system(size: 13, weight: .bold))
                 .tracking(2)
             ForEach(tasks) { task in
-                TaskRow(task: task) {
-                    taskStore.toggleComplete(task)
-                }
+                TaskRow(task: task,
+                        onToggle: { taskStore.toggleComplete(task) },
+                        onDelete: { taskStore.deleteTask(task) })
             }
         }
     }
@@ -174,21 +174,24 @@ struct TaskRow: View {
     var isComplete = false
     var priority: PriorityLevel?
     var onToggle: () -> Void = {}
+    var onDelete: () -> Void = {}
 
-    init(task: TaskItem, onToggle: @escaping () -> Void = {}) {
+    init(task: TaskItem, onToggle: @escaping () -> Void = {}, onDelete: @escaping () -> Void = {}) {
         self.title = task.title
         self.subtitle = task.subtitle
         self.isComplete = task.isComplete
         self.priority = task.priority
         self.onToggle = onToggle
+        self.onDelete = onDelete
     }
 
-    init(title: String, subtitle: String, isComplete: Bool = false, onToggle: @escaping () -> Void = {}) {
+    init(title: String, subtitle: String, isComplete: Bool = false, onToggle: @escaping () -> Void = {}, onDelete: @escaping () -> Void = {}) {
         self.title = title
         self.subtitle = subtitle
         self.isComplete = isComplete
         self.priority = nil
         self.onToggle = onToggle
+        self.onDelete = onDelete
     }
 
     var body: some View {
@@ -217,6 +220,15 @@ struct TaskRow: View {
                     .lineLimit(1)
             }
             Spacer()
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(AppTheme.mutedText)
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 18)
         .frame(height: 74)

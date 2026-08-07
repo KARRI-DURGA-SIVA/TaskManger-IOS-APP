@@ -191,6 +191,15 @@ final class TaskStore: ObservableObject {
         }
     }
 
+    func deleteTask(_ task: TaskItem) {
+        tasks.removeAll { $0.id == task.id }
+        save()
+
+        Task {
+            await syncClient.upsert(task: task)
+        }
+    }
+
     func tasks(in category: String) -> [TaskItem] {
         tasks.filter { $0.category == category }.sorted { $0.dueDate < $1.dueDate }
     }
